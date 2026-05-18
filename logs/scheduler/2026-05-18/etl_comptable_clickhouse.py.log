@@ -1,0 +1,35 @@
+[2026-05-18T12:01:03.305+0000] {processor.py:157} INFO - Started process (PID=257458) to work on /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:03.306+0000] {processor.py:829} INFO - Processing file /opt/airflow/dags/etl_comptable_clickhouse.py for tasks to queue
+[2026-05-18T12:01:03.308+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:03.307+0000] {dagbag.py:539} INFO - Filling up the DagBag from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:03.325+0000] {processor.py:839} INFO - DAG(s) dict_keys(['etl_comptable_clickhouse']) retrieved from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:03.370+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:03.370+0000] {dag.py:2915} INFO - Sync 1 DAGs
+[2026-05-18T12:01:03.393+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:03.392+0000] {dag.py:3696} INFO - Setting next_dagrun for etl_comptable_clickhouse to None, run_after=None
+[2026-05-18T12:01:03.422+0000] {processor.py:179} INFO - Processing /opt/airflow/dags/etl_comptable_clickhouse.py took 0.123 seconds
+[2026-05-18T12:01:08.755+0000] {processor.py:157} INFO - Started process (PID=257688) to work on /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:08.756+0000] {processor.py:829} INFO - Processing file /opt/airflow/dags/etl_comptable_clickhouse.py for tasks to queue
+[2026-05-18T12:01:08.759+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:08.757+0000] {dagbag.py:539} INFO - Filling up the DagBag from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:08.777+0000] {processor.py:839} INFO - DAG(s) dict_keys(['etl_comptable_clickhouse']) retrieved from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:08.812+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:08.812+0000] {dag.py:2915} INFO - Sync 1 DAGs
+[2026-05-18T12:01:08.829+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:08.829+0000] {dag.py:3696} INFO - Setting next_dagrun for etl_comptable_clickhouse to None, run_after=None
+[2026-05-18T12:01:08.850+0000] {processor.py:179} INFO - Processing /opt/airflow/dags/etl_comptable_clickhouse.py took 0.103 seconds
+[2026-05-18T12:01:33.512+0000] {processor.py:157} INFO - Started process (PID=257463) to work on /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:33.513+0000] {processor.py:829} INFO - Processing file /opt/airflow/dags/etl_comptable_clickhouse.py for tasks to queue
+[2026-05-18T12:01:33.514+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:33.513+0000] {dagbag.py:539} INFO - Filling up the DagBag from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:33.531+0000] {processor.py:839} INFO - DAG(s) dict_keys(['etl_comptable_clickhouse']) retrieved from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:33.577+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:33.577+0000] {dag.py:2915} INFO - Sync 1 DAGs
+[2026-05-18T12:01:33.594+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:33.594+0000] {dag.py:3696} INFO - Setting next_dagrun for etl_comptable_clickhouse to None, run_after=None
+[2026-05-18T12:01:33.617+0000] {processor.py:179} INFO - Processing /opt/airflow/dags/etl_comptable_clickhouse.py took 0.111 seconds
+[2026-05-18T12:01:39.014+0000] {processor.py:157} INFO - Started process (PID=257693) to work on /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:39.015+0000] {processor.py:829} INFO - Processing file /opt/airflow/dags/etl_comptable_clickhouse.py for tasks to queue
+[2026-05-18T12:01:39.016+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:39.016+0000] {dagbag.py:539} INFO - Filling up the DagBag from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:39.037+0000] {processor.py:839} INFO - DAG(s) dict_keys(['etl_comptable_clickhouse']) retrieved from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:01:39.078+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:39.078+0000] {dag.py:2915} INFO - Sync 1 DAGs
+[2026-05-18T12:01:39.094+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:01:39.093+0000] {dag.py:3696} INFO - Setting next_dagrun for etl_comptable_clickhouse to None, run_after=None
+[2026-05-18T12:01:39.111+0000] {processor.py:179} INFO - Processing /opt/airflow/dags/etl_comptable_clickhouse.py took 0.102 seconds
+[2026-05-18T12:02:03.765+0000] {processor.py:157} INFO - Started process (PID=257468) to work on /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:02:03.766+0000] {processor.py:829} INFO - Processing file /opt/airflow/dags/etl_comptable_clickhouse.py for tasks to queue
+[2026-05-18T12:02:03.767+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:02:03.767+0000] {dagbag.py:539} INFO - Filling up the DagBag from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:02:03.789+0000] {processor.py:839} INFO - DAG(s) dict_keys(['etl_comptable_clickhouse']) retrieved from /opt/airflow/dags/etl_comptable_clickhouse.py
+[2026-05-18T12:02:03.822+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:02:03.822+0000] {dag.py:2915} INFO - Sync 1 DAGs
+[2026-05-18T12:02:03.846+0000] {logging_mixin.py:151} INFO - [2026-05-18T12:02:03.846+0000] {dag.py:3696} INFO - Setting next_dagrun for etl_comptable_clickhouse to None, run_after=None
+[2026-05-18T12:02:03.886+0000] {processor.py:179} INFO - Processing /opt/airflow/dags/etl_comptable_clickhouse.py took 0.125 seconds
