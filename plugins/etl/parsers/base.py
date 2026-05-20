@@ -300,11 +300,73 @@ def find_header_row(data: list, search_terms: List[str], max_rows: int = 15) -> 
         row = data[i]
         if not row:
             continue
-        
+
         row_text = " ".join([str(v).lower() for v in row if is_valid(v)])
-        
+
         matches = sum(1 for term in search_terms if term.lower() in row_text)
         if matches >= len(search_terms) * 0.5:
             return i
-    
+
     return -1
+
+
+# ========================================
+# DETECTION DES COLONNES PAR HEADER
+# ========================================
+
+def _normalize_header(label: Any) -> str:
+    """Nettoie un libellé d'en-tête : minuscules, sans accents simples, sans saut de ligne."""
+    s = str(label).lower().strip()
+    # Suppression sauts de ligne (Sage met des labels du type "Mouvement \ndébit")
+    s = re.sub(r'\s+', ' ', s)
+    return s
+
+
+def detect_columns_by_header(
+    data: list,
+    column_aliases: Dict[str, List[str]],
+    max_rows: int = 15,
+    min_matches: int = 3,
+) -> Tuple[int, Dict[str, int]]:
+    """
+    Détecte automatiquement les positions des colonnes en cherchant les
+    labels d'en-tête connus dans les premières lignes du fichier.
+
+    Args:
+        data: contenu du fichier (liste de lignes).
+        column_aliases: mapping rôle métier → liste d'alias possibles.
+            ex: {'debit': ['mouvement debit', 'debit', 'mouvement débit']}
+        max_rows: nombre de lignes max à scanner depuis le début.
+        min_matches: nombre minimum de rôles trouvés pour considérer la
+            ligne comme une vraie en-tête.
+
+    Returns:
+        (header_row_index, {role: col_index, ...})
+        Si aucune en-tête détectée : (-1, {}).
+    """
+    best_row = -1
+    best_mapping: Dict[str, int] = {}
+
+    for i in range(min(max_rows, len(data))):
+        row = data[i]
+        if not row:
+            continue
+
+        mapping: Dict[str, int] = {}
+        for col_idx, val in enumerate(row):
+            if not is_valid(val):
+                continue
+            norm = _normalize_header(val)
+            for role, aliases in column_aliases.items():
+                if role in mapping:
+                    continue  # déjà trouvé
+                for alias in aliases:
+                    if alias.lower() in norm:
+                        mapping[role] = col_idx
+                        break
+
+        if len(mapping) >= min_matches and len(mapping) > len(best_mapping):
+            best_row = i
+            best_mapping = mapping
+
+    return best_row, best_mapping

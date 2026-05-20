@@ -1,7 +1,18 @@
 """
-Parser pour le Grand Livre Comptable (GRAND_LIVRE_COMPTABLE.xlsx)
-Fichier unique contenant les comptes, transactions, tiers et factures
-Extraction robuste par patterns - ignore les colonnes vides
+Parser pour le Grand Livre Comptable Excel.
+
+Version 2 : détection automatique des colonnes via les labels d'en-tête,
+plus de positions hardcodées. Le parser tolère donc différentes configurations
+d'export Sage (différents intervalles de colonnes selon la version Sage, les
+options d'export, la traduction, etc.).
+
+Structure attendue par le parser :
+    - 1 ligne d'en-tête contenant les labels : "Date", "C.j" / "Journal",
+      "N° pièce", "Libellé écriture" / "Libellé", "Mouvement débit" / "Débit",
+      "Mouvement crédit" / "Crédit", "Solde progressif" / "Solde".
+      (Tolère les sauts de ligne et accents dans les labels.)
+    - Pour chaque compte : 1 ligne d'en-tête `[compte, intitulé]`, suivie de
+      ses transactions, suivie d'une ligne "Total compte ...".
 """
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple, Union
@@ -9,15 +20,33 @@ from typing import Dict, List, Optional, Tuple, Union
 import pandas as pd
 
 from etl.parsers.base import (
-    is_valid, clean, get_cell, compact_row, get_values_only,
+    is_valid, clean, get_cell, compact_row,
     is_date_iso, is_compte_8_digits, is_code_journal,
     is_numeric_amount, contains_total, is_metadata_row,
     parse_amount, format_date_fr, format_date_iso,
-    extract_periode_from_date, extract_file_metadata
+    extract_periode_from_date, extract_file_metadata,
+    detect_columns_by_header,
 )
 
 # Journaux des À-Nouveaux : exemptés de la validation période (reprise N-1).
 RAN_JOURNAUX = {'RAN', 'AN'}
+
+
+# Alias possibles pour chaque rôle de colonne dans le grand livre Excel.
+# Les valeurs sont matchées en sous-chaîne (insensible à la casse / sauts de
+# ligne / espaces multiples), donc "Mouvement \ndébit" matche "mouvement debit".
+_COLUMN_ALIASES: Dict[str, List[str]] = {
+    'date': ['date'],
+    'code_journal': ['c.j', 'code journal', 'journal'],
+    'numero_piece': ['n° pièce', 'n° piece', 'numero piece', 'piece'],
+    'libelle': ['libellé écriture', 'libelle ecriture', 'libellé', 'libelle'],
+    'debit': ['mouvement débit', 'mouvement debit', 'débit', 'debit'],
+    'credit': ['mouvement crédit', 'mouvement credit', 'crédit', 'credit'],
+    'solde': ['solde progressif', 'solde'],
+    # Colonnes facultatives — peuvent être absentes selon le format Sage
+    'n_tiers': ['n° tiers', 'numero tiers', 'compte tiers'],
+    'numero_facture': ['n° facture', 'numero facture', 'facture'],
+}
 
 
 def _to_date(val: Union[None, str, date, datetime]) -> Optional[date]:
@@ -30,55 +59,49 @@ def _to_date(val: Union[None, str, date, datetime]) -> Optional[date]:
     return pd.to_datetime(val).date()
 
 
-def detect_line_type(row: list) -> str:
+def _detect_line_type(row: list, col_map: Dict[str, int]) -> str:
     """
-    Détecte le type de ligne:
-    - 'compte': Ligne d'en-tête de compte (numéro + intitulé)
-    - 'transaction': Ligne de transaction (date + code journal + ...)
-    - 'total': Ligne de total
-    - 'skip': Ligne à ignorer
+    Détecte le type d'une ligne du grand livre selon le mapping de colonnes :
+    - 'compte'      : ligne d'en-tête de compte (compte + intitulé)
+    - 'transaction' : ligne d'écriture (date + code journal)
+    - 'total'       : ligne de total (à ignorer)
+    - 'skip'        : ligne à ignorer (vide, métadonnée, en-tête, etc.)
     """
     if not row:
         return 'skip'
-    
-    # Vérifier Total en premier
     if contains_total(row):
         return 'total'
-    
+
+    date_col = col_map.get('date')
+    journal_col = col_map.get('code_journal')
+
+    if date_col is not None and journal_col is not None:
+        date_val = get_cell(row, date_col)
+        journal_val = get_cell(row, journal_col)
+        if is_date_iso(date_val) and journal_val and 2 <= len(journal_val) <= 5:
+            return 'transaction'
+
+    # Ligne de compte : col 0 = numéro de compte (1 à 8 chiffres), pas un code
+    # journal en col 1 (sinon ça serait une transaction).
     col0 = get_cell(row, 0)
     col1 = get_cell(row, 1)
-    col2 = get_cell(row, 2)
-    
-    # Ligne de compte: Col0 = 6 chiffres, Col1 vide ou pas code journal, Col2 = intitulé
-    if is_compte_8_digits(col0) and not is_date_iso(col0):
-        if not is_code_journal(col1):
-            return 'compte'
-    
-    # Ligne de transaction: Col0 = date ISO, Col1 = code journal
-    if is_date_iso(col0):
-        if col1 and len(col1) >= 2 and len(col1) <= 5:
-            return 'transaction'
-    
+    if is_compte_8_digits(col0) and not is_date_iso(col0) and not is_code_journal(col1):
+        return 'compte'
+
     return 'skip'
 
 
-def extract_compte_from_row(row: list) -> Dict[str, str]:
-    """
-    Extrait les infos d'une ligne de compte.
-    Structure: [numero_compte, ?, intitule, ...]
-    """
+def _extract_compte(row: list) -> Dict[str, str]:
+    """Extrait (numéro, intitulé) depuis une ligne d'en-tête de compte."""
     values = compact_row(row)
-    
     numero = ""
     intitule = ""
-    
-    # Le premier élément devrait être le numéro de compte
+
     for val in values:
         if is_compte_8_digits(val):
             numero = val
             break
-    
-    # L'intitulé est généralement le texte après le numéro
+
     found_numero = False
     for val in values:
         if is_compte_8_digits(val):
@@ -87,81 +110,117 @@ def extract_compte_from_row(row: list) -> Dict[str, str]:
         if found_numero and val and not is_numeric_amount(val):
             intitule = val
             break
-    
-    return {
-        'numero': numero,
-        'intitule': intitule
-    }
+
+    return {'numero': numero, 'intitule': intitule}
 
 
-def extract_transaction_from_row(row: list) -> Dict[str, any]:
+def _cell_near(row: list, target_col: Optional[int], max_offset: int = 2) -> str:
     """
-    Extrait les infos d'une ligne de transaction.
-    
-    Structure typique des colonnes (positions fixes):
-    - Col 0: Date
-    - Col 1: Code Journal
-    - Col 2: N° pièce
-    - Col 4: N° facture
-    - Col 9: Libellé
-    - Col 12: N° tiers
-    - Col 16: Débit
-    - Col 18: Crédit
-    - Col 20: Solde
-    
-    Mais on vérifie aussi les valeurs compactées pour la robustesse.
+    Récupère la 1ère valeur non-vide dans une fenêtre [target - max_offset,
+    target + max_offset]. Utile pour les exports Sage Excel où les cellules
+    fusionnées créent un décalage entre la col du header et la col de la
+    valeur effective.
     """
-    # Extraction par position fixe (méthode principale)
-    date_transaction = format_date_fr(get_cell(row, 0))
-    date_iso = format_date_iso(get_cell(row, 0))
-    code_journal = get_cell(row, 1)
-    numero_piece = get_cell(row, 2)
-    numero_facture = get_cell(row, 4)
-    libelle = get_cell(row, 9)
-    n_tiers = get_cell(row, 12)
-    
-    # Vérifier que n_tiers n'est pas une date
+    if target_col is None or target_col < 0:
+        return ""
+    # On essaie la position exacte d'abord, puis -1, +1, -2, +2 (élargissement
+    # progressif). Le 1er hit gagne.
+    for offset in range(max_offset + 1):
+        for sign in (0,) if offset == 0 else (-1, 1):
+            col = target_col + sign * offset
+            if 0 <= col < len(row):
+                val = get_cell(row, col)
+                if val:
+                    return val
+    return ""
+
+
+def _attribute_amounts(
+    row: list,
+    col_map: Dict[str, int],
+) -> Tuple[float, float, float]:
+    """
+    Attribue les valeurs numériques de la ligne à debit/credit/solde selon
+    la proximité de leur colonne aux positions détectées dans le header.
+
+    Gère les exports Sage où les montants sont décalés par rapport aux labels
+    d'en-tête à cause des cellules fusionnées.
+    """
+    debit_col = col_map.get('debit', -1)
+    credit_col = col_map.get('credit', -1)
+    solde_col = col_map.get('solde', -1)
+
+    # Bornes pour ignorer les nombres avant la zone des montants (date, n° pièce
+    # qui peut être numérique, etc.)
+    min_amount_col = min(c for c in (debit_col, credit_col, solde_col) if c >= 0) - 2 \
+        if any(c >= 0 for c in (debit_col, credit_col, solde_col)) else 0
+
+    debit = 0.0
+    credit = 0.0
+    solde = 0.0
+
+    for col, val in enumerate(row):
+        if col < min_amount_col:
+            continue
+        if not is_valid(val) or not is_numeric_amount(val):
+            continue
+        amount = parse_amount(val)
+        # Distances aux cols connues
+        candidates: List[Tuple[int, str]] = []
+        if debit_col >= 0:
+            candidates.append((abs(col - debit_col), 'debit'))
+        if credit_col >= 0:
+            candidates.append((abs(col - credit_col), 'credit'))
+        if solde_col >= 0:
+            candidates.append((abs(col - solde_col), 'solde'))
+        if not candidates:
+            continue
+        candidates.sort()
+        best = candidates[0][1]
+        # Le solde l'emporte si on est à égalité ou très proche, car il est
+        # toujours présent (signé). Sinon premier le plus proche.
+        if best == 'debit':
+            debit = amount
+        elif best == 'credit':
+            credit = amount
+        else:
+            solde = amount
+
+    return debit, credit, solde
+
+
+def _extract_transaction(row: list, col_map: Dict[str, int]) -> Dict[str, object]:
+    """
+    Extrait une transaction en se basant sur le mapping de colonnes.
+
+    Stratégie :
+    - Date et code journal : position exacte (toujours fiable).
+    - Texte (n° pièce, libellé, n° tiers, n° facture) : fenêtre ±2 col autour
+      de la position du header pour absorber les décalages dûs aux cellules
+      fusionnées.
+    - Montants (débit/crédit/solde) : attribution par proximité de colonne,
+      gère les décalages variables (cf _attribute_amounts).
+    """
+    date_raw = get_cell(row, col_map.get('date', 0))
+    date_transaction = format_date_fr(date_raw)
+    date_iso = format_date_iso(date_raw)
+
+    code_journal = get_cell(row, col_map.get('code_journal', 1))
+
+    numero_piece = _cell_near(row, col_map.get('numero_piece'))
+    libelle = _cell_near(row, col_map.get('libelle'), max_offset=2)
+    n_tiers = _cell_near(row, col_map.get('n_tiers'))
+    numero_facture = _cell_near(row, col_map.get('numero_facture'))
+
+    # Garde-fous : si on a capté une date ou un montant à la place du texte
     if is_date_iso(n_tiers):
         n_tiers = ""
-    
-    # Extraction des montants (positions fixes)
-    debit = parse_amount(get_cell(row, 16))
-    credit = parse_amount(get_cell(row, 18))
-    solde = parse_amount(get_cell(row, 20))
-    
-    # Fallback: si les montants sont à 0, chercher dans les dernières colonnes
-    if debit == 0 and credit == 0:
-        # Chercher les montants dans les valeurs compactées
-        values = compact_row(row)
-        amounts = []
-        for val in reversed(values):
-            if is_numeric_amount(val):
-                amounts.append(parse_amount(val))
-            if len(amounts) >= 3:
-                break
-        
-        # Les 3 derniers nombres sont généralement: débit, crédit, solde
-        if len(amounts) >= 3:
-            solde = amounts[0]
-            credit = amounts[1]
-            debit = amounts[2]
-        elif len(amounts) == 2:
-            solde = amounts[0]
-            # Déterminer si c'est débit ou crédit par le signe
-            if amounts[1] > 0:
-                debit = amounts[1]
-            else:
-                credit = abs(amounts[1])
-    
-    # Fallback pour le libellé si vide
-    if not libelle:
-        values = compact_row(row)
-        # Le libellé est généralement le texte le plus long (après date, code journal, pièce)
-        for i, val in enumerate(values):
-            if i >= 3 and len(val) > 5 and not is_numeric_amount(val) and not is_date_iso(val):
-                libelle = val
-                break
-    
+    if is_numeric_amount(numero_piece) and len(numero_piece) > 6:
+        # Évite de capter un montant (long nombre) comme pièce
+        numero_piece = ""
+
+    debit, credit, solde = _attribute_amounts(row, col_map)
+
     return {
         'date_transaction': date_transaction,
         'date_iso': date_iso,
@@ -184,24 +243,13 @@ def parse_grand_livre(
     period_end: Union[None, str, date, datetime] = None,
 ) -> Dict:
     """
-    Parse le Grand Livre Comptable unifié.
+    Parse le Grand Livre Comptable Excel.
 
-    Parcourt le fichier et maintient le contexte du compte courant.
-    Chaque transaction hérite du compte auquel elle appartient.
+    Détecte automatiquement la disposition des colonnes via les labels
+    d'en-tête. Si fournis, period_start/period_end activent la validation
+    bloquante de période (toute date hors-range hors RAN lève ValueError).
 
-    Args:
-        file_path / client_id / batch_id : standard.
-        period_start / period_end : si fournis, toute transaction (hors journal
-            RAN) dont la date sort de [period_start, period_end] lève
-            ValueError au premier hors-période détecté.
-
-    Retourne: {
-        data: [(date_gl, entite, compte, intitule_compte, date_trans, code_journal,
-                numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
-                periode, batch_id, row_id)],
-        metadata,
-        stats
-    }
+    Returns: {data, entite, periode, date_extraction, stats, metadata}
     """
     print(f"📄 Lecture du Grand Livre: {file_path}")
 
@@ -210,17 +258,31 @@ def parse_grand_livre(
 
     df = pd.read_excel(file_path, header=None, dtype=str)
     data_list = df.values.tolist()
-    
-    # Extraire métadonnées
+
+    # Métadonnées (entité, période détectée, etc.)
     metadata = extract_file_metadata(data_list, client_id)
     entite = metadata['entite']
-    periode = metadata['periode']
     date_gl = metadata['date_extraction']
-    
+
+    # Détection automatique des colonnes via les labels d'en-tête
+    header_idx, col_map = detect_columns_by_header(
+        data_list,
+        _COLUMN_ALIASES,
+        max_rows=20,
+        min_matches=4,  # exiger au moins date + code_journal + debit + credit
+    )
+
+    if header_idx < 0 or 'date' not in col_map or 'code_journal' not in col_map:
+        raise ValueError(
+            f"Impossible de détecter les colonnes du grand livre dans {file_path}. "
+            f"Vérifier que la ligne d'en-tête contient au moins "
+            f"'Date', 'C.j', 'Mouvement débit/crédit'."
+        )
+
     print(f"  📋 Entité: {entite}")
-    print(f"  📋 Période: {periode}")
-    
-    results = []
+    print(f"  📋 Header détecté ligne {header_idx + 1}, colonnes: {col_map}")
+
+    results: List[Tuple] = []
     stats = {
         'nb_comptes': 0,
         'nb_transactions': 0,
@@ -229,23 +291,30 @@ def parse_grand_livre(
         'total_debit': 0.0,
         'total_credit': 0.0,
     }
-    
+
     compte_courant = {'numero': '', 'intitule': ''}
     row_id = 0
-    
-    for i, row in enumerate(data_list):
-        line_type = detect_line_type(row)
-        
+    date_min: Optional[date] = None
+    date_max: Optional[date] = None
+
+    # On ignore toutes les lignes jusqu'à la ligne d'en-tête (inclus) :
+    # le bloc data commence après.
+    start_idx = header_idx + 1
+
+    for i in range(start_idx, len(data_list)):
+        row = data_list[i]
+        line_type = _detect_line_type(row, col_map)
+
         if line_type == 'compte':
-            compte_courant = extract_compte_from_row(row)
+            compte_courant = _extract_compte(row)
             stats['nb_comptes'] += 1
-            
+
         elif line_type == 'transaction':
-            trans = extract_transaction_from_row(row)
+            trans = _extract_transaction(row, col_map)
 
             # Validation période — RAN exempté (reprise N-1)
             if period_start_d and period_end_d and trans['date_iso']:
-                code_journal = trans.get('code_journal', '').upper()
+                code_journal = (trans['code_journal'] or '').upper()
                 if code_journal not in RAN_JOURNAUX:
                     try:
                         d_trans = datetime.strptime(trans['date_iso'], '%Y-%m-%d').date()
@@ -260,10 +329,6 @@ def parse_grand_livre(
 
             row_id += 1
 
-            # Construire le tuple pour ClickHouse
-            # (date_gl, entite, compte, intitule_compte, date_trans, code_journal,
-            #  numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
-            #  periode, batch_id, row_id)
             results.append((
                 date_gl,
                 entite,
@@ -278,34 +343,65 @@ def parse_grand_livre(
                 trans['debit'],
                 trans['credit'],
                 trans['solde'],
-                periode,
+                '',  # periode, remplie plus bas
                 batch_id,
-                row_id
+                row_id,
             ))
-            
+
             stats['nb_transactions'] += 1
             stats['total_debit'] += trans['debit']
             stats['total_credit'] += trans['credit']
-            
+
             if trans['n_tiers']:
                 stats['nb_avec_tiers'] += 1
             if trans['numero_facture']:
                 stats['nb_avec_facture'] += 1
-    
-    # Vérifier l'équilibre
+
+            # Tracking min/max date pour la période détectée
+            if trans['date_iso']:
+                try:
+                    d = datetime.strptime(trans['date_iso'], '%Y-%m-%d').date()
+                    if date_min is None or d < date_min:
+                        date_min = d
+                    if date_max is None or d > date_max:
+                        date_max = d
+                except (ValueError, TypeError):
+                    pass
+
+        # 'total' et 'skip' → ignorés
+
+    # Période détectée : YYYYMM de la date max si dispo, sinon métadonnée
+    if date_max:
+        periode = date_max.strftime('%Y%m')
+    else:
+        periode = metadata.get('periode') or pd.Timestamp.now().strftime('%Y%m')
+
+    # Réinjection de la période dans chaque tuple (col 13)
+    results = [
+        row[:13] + (periode,) + row[14:]
+        for row in results
+    ]
+
     stats['equilibre'] = abs(stats['total_debit'] - stats['total_credit']) < 0.01
-    
+
     print(f"  ✓ {stats['nb_comptes']} comptes")
     print(f"  ✓ {stats['nb_transactions']} transactions")
-    print(f"  ✓ {stats['nb_avec_tiers']} avec N° tiers ({100*stats['nb_avec_tiers']/max(1,stats['nb_transactions']):.1f}%)")
-    print(f"  ✓ {stats['nb_avec_facture']} avec N° facture ({100*stats['nb_avec_facture']/max(1,stats['nb_transactions']):.1f}%)")
+    pct_tiers = 100 * stats['nb_avec_tiers'] / max(1, stats['nb_transactions'])
+    pct_fact = 100 * stats['nb_avec_facture'] / max(1, stats['nb_transactions'])
+    print(f"  ✓ {stats['nb_avec_tiers']} avec N° tiers ({pct_tiers:.1f}%)")
+    print(f"  ✓ {stats['nb_avec_facture']} avec N° facture ({pct_fact:.1f}%)")
+    print(f"  ✓ Période: {periode} "
+          f"({date_min.isoformat() if date_min else 'n/a'} "
+          f"→ {date_max.isoformat() if date_max else 'n/a'})")
+    print(f"  ✓ Débit total: {stats['total_debit']:,.2f} | "
+          f"Crédit total: {stats['total_credit']:,.2f}")
     print(f"  ✓ Équilibre: {'✅ OK' if stats['equilibre'] else '❌ Déséquilibre'}")
-    
+
     return {
         'data': results,
         'entite': entite,
         'periode': periode,
         'date_extraction': date_gl,
         'stats': stats,
-        'metadata': metadata
+        'metadata': metadata,
     }
