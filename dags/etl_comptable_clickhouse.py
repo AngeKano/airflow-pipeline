@@ -8,7 +8,13 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 from etl.config import DEFAULT_ARGS, ETLStatus
-from etl.postgres import update_etl_status, insert_generated_file, get_batch_info
+from etl.postgres import (
+    update_etl_status,
+    insert_generated_file,
+    get_batch_info,
+    update_files_error_message,
+    update_period_plan_source,
+)
 from etl.s3 import download_files_from_s3, validate_files, cleanup_local_files
 from etl.parsers import (
     parse_plan_compte,
@@ -25,6 +31,25 @@ from clickhouse.manager import ClickHouseManager
 
 
 # ============================================================
+# HELPERS
+# ============================================================
+
+def _capture_error(batch_id: str, exc: Exception) -> None:
+    """
+    Écrit le message d'exception sur tous les ComptableFile du batch
+    (champ errorMessage). Le front affichera ce message sur la page de
+    statut quand le batch est en FAILED.
+
+    Best-effort : si l'écriture Postgres échoue, on log mais on ne masque
+    pas l'exception métier d'origine.
+    """
+    try:
+        update_files_error_message(batch_id, f"{type(exc).__name__}: {exc}")
+    except Exception as e:
+        print(f"  ⚠️ _capture_error: impossible d'écrire errorMessage: {e}")
+
+
+# ============================================================
 # TASKS
 # ============================================================
 
@@ -34,44 +59,48 @@ def task_download_files(**context):
     client_id = params['client_id']
     batch_id = params['batch_id']
     s3_prefix = params['s3_prefix']
-    
-    print(f"🚀 Démarrage ETL pour client: {client_id}, batch: {batch_id}")
-    
-    # Mettre à jour le statut
-    update_etl_status(batch_id, ETLStatus.VALIDATING, 10)
-    
-    # Télécharger les fichiers
-    downloaded_files = download_files_from_s3(client_id, batch_id, s3_prefix)
-    
-    # Valider la présence des fichiers requis
-    if not validate_files(downloaded_files):
-        raise ValueError("Fichiers manquants")
 
-    # Valider que chaque fichier est dans un format autorisé pour son type
-    file_formats = {}
-    for file_type, path in downloaded_files.items():
-        fmt = detect_format(path)
-        validate_format(file_type, fmt)  # lève ValueError si non autorisé
-        file_formats[file_type] = fmt
-        print(f"  ✓ {file_type}: format '{fmt}' OK")
+    try:
+        print(f"🚀 Démarrage ETL pour client: {client_id}, batch: {batch_id}")
 
-    update_etl_status(batch_id, ETLStatus.VALIDATING, 20)
-    
-    # Créer la base ClickHouse
-    with ClickHouseManager() as ch:
-        ch.create_client_database(client_id)
-    
-    update_etl_status(batch_id, ETLStatus.VALIDATING, 30)
-    
-    # Retourner les chemins pour les tâches suivantes
-    return {
-        'client_id': client_id,
-        'batch_id': batch_id,
-        's3_prefix': s3_prefix,
-        'files': downloaded_files,
-        'file_formats': file_formats,
-        'local_dir': f"/tmp/etl_{client_id}_{batch_id}"
-    }
+        # Mettre à jour le statut
+        update_etl_status(batch_id, ETLStatus.VALIDATING, 10)
+
+        # Télécharger les fichiers
+        downloaded_files = download_files_from_s3(client_id, batch_id, s3_prefix)
+
+        # Valider la présence des fichiers requis
+        if not validate_files(downloaded_files):
+            raise ValueError("Fichiers manquants : les 4 fichiers comptables ne sont pas tous présents dans S3")
+
+        # Valider que chaque fichier est dans un format autorisé pour son type
+        file_formats = {}
+        for file_type, path in downloaded_files.items():
+            fmt = detect_format(path)
+            validate_format(file_type, fmt)  # lève ValueError si non autorisé
+            file_formats[file_type] = fmt
+            print(f"  ✓ {file_type}: format '{fmt}' OK")
+
+        update_etl_status(batch_id, ETLStatus.VALIDATING, 20)
+
+        # Créer la base ClickHouse
+        with ClickHouseManager() as ch:
+            ch.create_client_database(client_id)
+
+        update_etl_status(batch_id, ETLStatus.VALIDATING, 30)
+
+        # Retourner les chemins pour les tâches suivantes
+        return {
+            'client_id': client_id,
+            'batch_id': batch_id,
+            's3_prefix': s3_prefix,
+            'files': downloaded_files,
+            'file_formats': file_formats,
+            'local_dir': f"/tmp/etl_{client_id}_{batch_id}"
+        }
+    except Exception as exc:
+        _capture_error(batch_id, exc)
+        raise
 
 
 def task_process_plan_compte(**context):
@@ -183,6 +212,9 @@ def task_process_grand_livre(**context):
     - Période : transactions hors [periodStart, periodEnd] → fail (RAN exempté)
     - Équilibre : sum(debit) != sum(credit) → fail
     - Cohérence : plan source du grand livre vs plan_compte → fail si divergent
+
+    Toute ValueError métier est capturée pour écrire le message d'erreur
+    dans ComptableFile.errorMessage avant le re-raise (visible côté front).
     """
     ti = context['ti']
     data = ti.xcom_pull(task_ids='download_files')
@@ -192,92 +224,102 @@ def task_process_grand_livre(**context):
     file_path = data['files'].get('grand_livre')
     file_format = data['file_formats'].get('grand_livre')
 
-    if not file_path:
-        raise ValueError("Fichier Grand Livre non trouvé")
+    try:
+        if not file_path:
+            raise ValueError("Fichier Grand Livre non trouvé")
 
-    update_etl_status(batch_id, ETLStatus.PROCESSING, 70)
+        update_etl_status(batch_id, ETLStatus.PROCESSING, 70)
 
-    # Récupérer la période depuis comptable_periods (utilisée par les 2 formats)
-    batch_info = get_batch_info(batch_id)
-    if not batch_info:
-        raise ValueError(
-            f"Impossible de récupérer la période du batch {batch_id} "
-            f"depuis comptable_periods (requise pour la validation)"
-        )
-    period_start = batch_info['start_date']
-    period_end = batch_info['end_date']
-
-    # Dispatch selon format
-    if file_format == 'sage_pnm':
-        result = parse_sage_pnm(
-            file_path,
-            client_id,
-            batch_id,
-            period_start=period_start,
-            period_end=period_end,
-        )
-    else:
-        result = parse_grand_livre(
-            file_path,
-            client_id,
-            batch_id,
-            period_start=period_start,
-            period_end=period_end,
-        )
-
-    # Validation d'équilibre Débit/Crédit (bloquante)
-    stats = result['stats']
-    total_debit = stats.get('total_debit', 0)
-    total_credit = stats.get('total_credit', 0)
-    if not stats.get('equilibre', False):
-        raise ValueError(
-            f"Grand Livre déséquilibré: "
-            f"Débit={total_debit:,.2f} ≠ Crédit={total_credit:,.2f} "
-            f"(écart={total_debit - total_credit:,.2f})"
-        )
-
-    # Validation cohérence inter-fichiers : plan source GL vs plan_compte.
-    # Les valeurs 'UNKNOWN' (fichier sans comptes financiers discriminants)
-    # ne déclenchent pas de fail.
-    comptes_gl = sorted({row[2] for row in result['data']})
-    plan_source_gl = detect_plan_source(comptes_gl)
-    pc_stats = ti.xcom_pull(task_ids='process_plan_compte') or {}
-    plan_source_pc = pc_stats.get('plan_source', 'UNKNOWN')
-    print(f"  📋 Plan source — grand_livre: {plan_source_gl} | plan_compte: {plan_source_pc}")
-    if plan_source_gl != 'UNKNOWN' and plan_source_pc != 'UNKNOWN':
-        if plan_source_gl != plan_source_pc:
+        # Récupérer la période depuis comptable_periods (utilisée par les 2 formats)
+        batch_info = get_batch_info(batch_id)
+        if not batch_info:
             raise ValueError(
-                f"Incohérence de plan comptable détectée: "
-                f"plan_compte = {plan_source_pc}, grand_livre = {plan_source_gl}. "
-                f"Tous les fichiers d'un même batch doivent être dans le même plan."
+                f"Impossible de récupérer la période du batch {batch_id} "
+                f"depuis comptable_periods (requise pour la validation)"
+            )
+        period_start = batch_info['start_date']
+        period_end = batch_info['end_date']
+
+        # Dispatch selon format
+        if file_format == 'sage_pnm':
+            result = parse_sage_pnm(
+                file_path,
+                client_id,
+                batch_id,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        else:
+            result = parse_grand_livre(
+                file_path,
+                client_id,
+                batch_id,
+                period_start=period_start,
+                period_end=period_end,
             )
 
-    with ClickHouseManager() as ch:
-        # Enrichir avec rubriques + infos tiers + mapping PCG→SYSCO si applicable.
-        # On utilise le plan détecté sur le grand livre lui-même (cohérence déjà
-        # vérifiée plus haut avec plan_compte).
-        enriched_data = enrich_grand_livre(
-            client_id,
-            result['data'],
-            ch,
-            plan_source=plan_source_gl,
-        )
+        # Validation d'équilibre Débit/Crédit (bloquante)
+        stats = result['stats']
+        total_debit = stats.get('total_debit', 0)
+        total_credit = stats.get('total_credit', 0)
+        if not stats.get('equilibre', False):
+            raise ValueError(
+                f"Grand Livre déséquilibré: "
+                f"Débit={total_debit:,.2f} ≠ Crédit={total_credit:,.2f} "
+                f"(écart={total_debit - total_credit:,.2f})"
+            )
 
-        # Charger dans ClickHouse
-        ch.upsert_grand_livre(
-            client_id,
-            enriched_data,
-            result['periode'],
-            batch_id
-        )
+        # Validation cohérence inter-fichiers : plan source GL vs plan_compte.
+        # Les valeurs 'UNKNOWN' (fichier sans comptes financiers discriminants)
+        # ne déclenchent pas de fail.
+        comptes_gl = sorted({row[2] for row in result['data']})
+        plan_source_gl = detect_plan_source(comptes_gl)
+        pc_stats = ti.xcom_pull(task_ids='process_plan_compte') or {}
+        plan_source_pc = pc_stats.get('plan_source', 'UNKNOWN')
+        print(f"  📋 Plan source — grand_livre: {plan_source_gl} | plan_compte: {plan_source_pc}")
 
-    update_etl_status(batch_id, ETLStatus.PROCESSING, 85)
+        # Écrire le plan source en base dès qu'il est connu (avant le upsert
+        # ClickHouse) : même si l'upsert plante ensuite, le front peut afficher
+        # le plan détecté pour aider au debug.
+        update_period_plan_source(batch_id, plan_source_gl)
 
-    return {
-        'periode': result['periode'],
-        'plan_source': plan_source_gl,
-        'stats': result['stats']
-    }
+        if plan_source_gl != 'UNKNOWN' and plan_source_pc != 'UNKNOWN':
+            if plan_source_gl != plan_source_pc:
+                raise ValueError(
+                    f"Incohérence de plan comptable détectée: "
+                    f"plan_compte = {plan_source_pc}, grand_livre = {plan_source_gl}. "
+                    f"Tous les fichiers d'un même batch doivent être dans le même plan."
+                )
+
+        with ClickHouseManager() as ch:
+            # Enrichir avec rubriques + infos tiers + mapping PCG→SYSCO si applicable.
+            # On utilise le plan détecté sur le grand livre lui-même (cohérence déjà
+            # vérifiée plus haut avec plan_compte).
+            enriched_data = enrich_grand_livre(
+                client_id,
+                result['data'],
+                ch,
+                plan_source=plan_source_gl,
+            )
+
+            # Charger dans ClickHouse
+            ch.upsert_grand_livre(
+                client_id,
+                enriched_data,
+                result['periode'],
+                batch_id
+            )
+
+        update_etl_status(batch_id, ETLStatus.PROCESSING, 85)
+
+        return {
+            'periode': result['periode'],
+            'plan_source': plan_source_gl,
+            'stats': result['stats']
+        }
+    except Exception as exc:
+        _capture_error(batch_id, exc)
+        raise
 
 
 def task_export_excel(**context):

@@ -170,6 +170,71 @@ def insert_generated_file(
             conn.close()
 
 
+def update_files_error_message(batch_id: str, error_message: str) -> None:
+    """
+    Écrit le message d'erreur sur TOUS les ComptableFile du batch.
+
+    Utilisé par le DAG quand une validation bloquante échoue (équilibre,
+    période, cohérence de plan, format) — le front affichera ce message
+    sur la page de statut. Le champ ComptableFile.errorMessage existe déjà
+    dans le schéma Prisma, pas de migration nécessaire.
+    """
+    if not error_message:
+        return
+    # PostgreSQL tronque silencieusement seulement si le champ a une longueur
+    # fixe ; ici c'est un text, donc on tronque côté Python par sécurité.
+    truncated = error_message[:2000]
+
+    conn = None
+    try:
+        conn = get_postgres_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE comptable_files
+            SET "errorMessage" = %s
+            WHERE "batchId" = %s
+        """, (truncated, batch_id))
+        conn.commit()
+        print(f"  📝 errorMessage propagé sur {cur.rowcount} fichiers du batch")
+    except Exception as e:
+        print(f"  ⚠️ Erreur écriture errorMessage: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_period_plan_source(batch_id: str, plan_source: str) -> None:
+    """
+    Écrit le plan comptable détecté ('PCG' | 'SYSCOHADA' | 'UNKNOWN') dans
+    comptable_periods.planSource.
+
+    Permet au front d'afficher un badge "Plan: SYSCOHADA" ou
+    "PCG → SYSCOHADA" sur la page de statut.
+    """
+    if not plan_source:
+        return
+    conn = None
+    try:
+        conn = get_postgres_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE comptable_periods
+            SET "planSource" = %s
+            WHERE "batchId" = %s
+        """, (plan_source, batch_id))
+        conn.commit()
+        print(f"  📋 planSource '{plan_source}' enregistré pour le batch")
+    except Exception as e:
+        print(f"  ⚠️ Erreur écriture planSource: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+
 def get_batch_info(batch_id: str) -> Optional[Dict]:
     """
     Récupère les informations d'un batch.

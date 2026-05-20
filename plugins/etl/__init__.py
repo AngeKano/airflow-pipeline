@@ -13,6 +13,8 @@ from etl.postgres import (
     get_postgres_connection,
     update_etl_status,
     get_batch_info,
+    update_files_error_message,
+    update_period_plan_source,
 )
 from etl.s3 import (
     get_s3_client,
@@ -54,6 +56,8 @@ __all__ = [
     'get_postgres_connection',
     'update_etl_status',
     'get_batch_info',
+    'update_files_error_message',
+    'update_period_plan_source',
     # S3
     'get_s3_client',
     'download_files_from_s3',
