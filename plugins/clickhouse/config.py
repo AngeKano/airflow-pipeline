@@ -3,14 +3,27 @@ Configuration ClickHouse pour REPFI
 """
 import os
 
+
+def _env(name: str, default: str) -> str:
+    """
+    Lit une variable d'environnement avec un défaut résistant aux valeurs vides.
+
+    os.getenv ne retourne le défaut que si la variable n'est PAS définie ;
+    elle retourne '' si la variable est définie mais vide (ex: CLICKHOUSE_PORT=
+    dans un .env). Ici on veut le défaut dans les deux cas.
+    """
+    val = os.getenv(name)
+    return val if val else default
+
+
 # ========================================
 # CONFIGURATION CONNEXION
 # ========================================
 CLICKHOUSE_CONFIG = {
-    'host': os.getenv('CLICKHOUSE_HOST', 'localhost'),
-    'port': int(os.getenv('CLICKHOUSE_PORT', 9000)),
-    'user': os.getenv('CLICKHOUSE_USER', 'default'),
-    'password': os.getenv('CLICKHOUSE_PASSWORD', ''),
+    'host': _env('CLICKHOUSE_HOST', 'localhost'),
+    'port': int(_env('CLICKHOUSE_PORT', '9000')),
+    'user': _env('CLICKHOUSE_USER', 'default'),
+    'password': _env('CLICKHOUSE_PASSWORD', ''),
 }
 
 # ========================================
