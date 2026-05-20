@@ -1,13 +1,15 @@
+# Fichiers d'environnement
 .env*
 
-#.claude
+# Claude
 /.claude
 
-#ressources
+# Ressources
 /ressources
 
-#tests
+# Tests
 /tests
 
+# Cache Python
 __pycache__/
 *.pyc
