@@ -182,3 +182,78 @@ PLE_MAPPING_DATA = [
     ('886', 'TO', 3),
     ('888', 'TO', 3),
 ]
+
+# ========================================
+# MAPPING PCG FRANÇAIS → SYSCOHADA RÉVISÉ
+# ========================================
+# Format: (compte_pcg, compte_syscohada, is_hao, libelle)
+# - compte_pcg : numéro ou racine (3-6 chiffres). Lookup d'abord en exact, puis fallback racine 3 chiffres.
+# - is_hao : True si Hors Activités Ordinaires (classe 8 SYSCOHADA)
+# Couverture V1 : 30 mappings critiques (banque, caisse, achats, ventes, personnel, TVA, capital, immo).
+# Fallback racine 3 chiffres pour les comptes non listés.
+PCG_SYSCOHADA_MAPPING = [
+    # --- Trésorerie ---
+    ('512', '521', False, 'Banques'),
+    ('514', '522', False, 'Chèques postaux'),
+    ('531', '571', False, 'Caisse siège social'),
+    ('532', '572', False, 'Caisse succursale'),
+
+    # --- Achats ---
+    ('607', '601', False, 'Achats de marchandises'),
+    ('601', '602', False, 'Achats de matières premières'),
+    ('602', '604', False, 'Achats stockés - Autres approvisionnements'),
+    ('604', '605', False, 'Achats d\'études et prestations de services'),
+    ('606', '605', False, 'Achats non stockés de matières et fournitures'),
+
+    # --- Ventes ---
+    ('707', '701', False, 'Ventes de marchandises'),
+    ('701', '702', False, 'Ventes de produits finis'),
+    ('706', '706', False, 'Services vendus'),
+    ('708', '707', False, 'Produits des activités annexes'),
+
+    # --- Personnel ---
+    ('641', '661', False, 'Rémunérations directes versées au personnel'),
+    ('645', '664', False, 'Charges sociales'),
+    ('647', '668', False, 'Autres charges sociales'),
+
+    # --- TVA ---
+    ('44571', '4431', False, 'TVA collectée sur ventes'),
+    ('44566', '4452', False, 'TVA déductible sur biens et services'),
+    ('44562', '4451', False, 'TVA déductible sur immobilisations'),
+
+    # --- Capital & résultat ---
+    ('101', '101', False, 'Capital social'),
+    ('1061', '111', False, 'Réserve légale'),
+    ('110', '121', False, 'Report à nouveau créditeur'),
+    ('119', '129', False, 'Report à nouveau débiteur'),
+    ('120', '131', False, 'Résultat de l\'exercice (bénéfice)'),
+    ('129', '139', False, 'Résultat de l\'exercice (perte)'),
+
+    # --- Immobilisations ---
+    ('20', '21', False, 'Immobilisations incorporelles'),
+    ('21', '24', False, 'Immobilisations corporelles'),
+    ('27', '26', False, 'Titres de participation'),
+
+    # --- Charges/produits financiers ---
+    ('66', '67', False, 'Frais financiers'),
+    ('76', '77', False, 'Revenus financiers'),
+
+    # --- Charges/produits HAO (hors activités ordinaires) ---
+    ('671', '831', True, 'Charges exceptionnelles → HAO'),
+    ('771', '841', True, 'Produits exceptionnels → HAO'),
+    ('675', '834', True, 'VNC des éléments d\'actif cédés → HAO'),
+    ('775', '822', True, 'Produits des cessions d\'immobilisations → HAO'),
+
+    # --- Tiers (identique PCG/SYSCOHADA) ---
+    ('411', '411', False, 'Clients'),
+    ('401', '401', False, 'Fournisseurs'),
+
+    # --- Stocks ---
+    ('31', '31', False, 'Stocks de marchandises'),
+    ('32', '32', False, 'Stocks de matières premières'),
+
+    # --- Dotations & reprises ---
+    ('681', '681', False, 'Dotations aux amortissements'),
+    ('781', '791', False, 'Reprises sur amortissements et provisions'),
+]
+

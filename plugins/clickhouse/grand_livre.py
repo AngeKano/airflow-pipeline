@@ -30,6 +30,10 @@ class GrandLivreManager(ClickHouseBase):
         'periode': ('String', None),
         'batch_id': ('String', None),
         'row_id': ('UInt32', None),
+        # Traçabilité du mapping PCG → SYSCOHADA (vide si source déjà SYSCOHADA)
+        'compte_pcg_origine': ('String', "''"),
+        'is_hao': ('UInt8', '0'),
+        'mapping_status': ('String', "'none'"),
         'updated_at': ('DateTime', 'now()'),
     }
 
@@ -58,6 +62,9 @@ class GrandLivreManager(ClickHouseBase):
                 periode String,
                 batch_id String,
                 row_id UInt32,
+                compte_pcg_origine String DEFAULT '',
+                is_hao UInt8 DEFAULT 0,
+                mapping_status String DEFAULT 'none',
                 updated_at DateTime DEFAULT now()
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (batch_id, periode, compte, date_transaction, code_journal, numero_piece, row_id)
@@ -103,19 +110,30 @@ class GrandLivreManager(ClickHouseBase):
     def upsert(self, client_id: str, data: List[Tuple], periode: str, batch_id: str):
         """
         Insère les transactions du Grand Livre.
-        
-        Format data attendu (19 colonnes):
+
+        Format data attendu (22 colonnes):
         (date_gl, entite, compte, intitule_compte, rubrique, date_transaction,
          code_journal, numero_piece, numero_facture, libelle_ecriture,
          n_tiers, intitule_tiers, type_tiers, debit, credit, solde,
-         periode, batch_id, row_id)
+         periode, batch_id, row_id,
+         compte_pcg_origine, is_hao, mapping_status)
         """
         if not data:
             print("⚠️ Aucune transaction à insérer")
             return
 
+        # Sanity check : on s'attend à 22 colonnes par tuple. Les anciennes
+        # versions de enrich_grand_livre produisaient 19 colonnes ; on les
+        # rejette explicitement pour éviter un INSERT silencieusement corrompu.
+        if len(data[0]) != 22:
+            raise ValueError(
+                f"upsert_grand_livre: tuples de {len(data[0])} colonnes reçus, "
+                f"attendu 22 (sortie de enrich_grand_livre). "
+                f"Mettre à jour les appelants."
+            )
+
         db_name = self._get_db_name(client_id)
-        
+
         # S'assurer que le schéma est à jour avant l'insertion
         self._migrate_schema(db_name)
 
@@ -132,7 +150,8 @@ class GrandLivreManager(ClickHouseBase):
                 date_gl, entite, compte, intitule_compte, rubrique,
                 date_transaction, code_journal, numero_piece, numero_facture,
                 libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
-                debit, credit, solde, periode, batch_id, row_id
+                debit, credit, solde, periode, batch_id, row_id,
+                compte_pcg_origine, is_hao, mapping_status
             ) VALUES
         """
         self._execute(query, data)
@@ -172,7 +191,7 @@ class GrandLivreManager(ClickHouseBase):
         }
 
     def get_data(self, client_id: str, batch_id: str) -> List[Tuple]:
-        """Récupère toutes les données du grand livre pour export."""
+        """Récupère toutes les données du grand livre pour export (22 colonnes)."""
         db_name = self._get_db_name(client_id)
 
         return self._execute(f"""
@@ -180,7 +199,8 @@ class GrandLivreManager(ClickHouseBase):
                 date_gl, entite, compte, intitule_compte, rubrique,
                 date_transaction, code_journal, numero_piece, numero_facture,
                 libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
-                debit, credit, solde, periode, batch_id, row_id
+                debit, credit, solde, periode, batch_id, row_id,
+                compte_pcg_origine, is_hao, mapping_status
             FROM {db_name}.grand_livre
             WHERE batch_id = %(batch_id)s
             ORDER BY compte, date_transaction, row_id

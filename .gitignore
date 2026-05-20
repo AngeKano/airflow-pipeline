@@ -1,1 +1,10 @@
 .env*
+
+#.claude
+/.claude
+
+#ressources
+/ressources
+
+#tests
+/tests

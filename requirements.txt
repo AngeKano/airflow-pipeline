@@ -6,3 +6,6 @@ numpy==1.24.3
 clickhouse-driver
 boto3
 psycopg2-binary
+
+# Tests (utilisé uniquement par `pytest tests/`)
+pytest>=7.4

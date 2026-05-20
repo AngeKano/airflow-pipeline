@@ -26,10 +26,21 @@ from etl.parsers import (
     parse_code_journal,
     parse_plan_tiers,
     parse_grand_livre,
+    parse_sage_pnm,
+    parse_sage_pnc,
 )
 from etl.processors import (
     enrich_grand_livre,
     export_grand_livre_excel,
+)
+from etl.format_detect import (
+    detect_format,
+    validate_format,
+    ALLOWED_FORMATS,
+)
+from etl.mapping import (
+    map_compte,
+    detect_plan_source,
 )
 
 __all__ = [
@@ -54,9 +65,18 @@ __all__ = [
     'parse_code_journal',
     'parse_plan_tiers',
     'parse_grand_livre',
+    'parse_sage_pnm',
+    'parse_sage_pnc',
     # Processors
     'enrich_grand_livre',
     'export_grand_livre_excel',
+    # Format detection
+    'detect_format',
+    'validate_format',
+    'ALLOWED_FORMATS',
+    # Mapping comptable
+    'map_compte',
+    'detect_plan_source',
 ]
 
 __version__ = '3.0.0'

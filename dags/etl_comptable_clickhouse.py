@@ -15,8 +15,12 @@ from etl.parsers import (
     parse_code_journal,
     parse_plan_tiers,
     parse_grand_livre,
+    parse_sage_pnm,
+    parse_sage_pnc,
 )
 from etl.processors import enrich_grand_livre, export_grand_livre_excel
+from etl.format_detect import detect_format, validate_format
+from etl.mapping import detect_plan_source, map_compte
 from clickhouse.manager import ClickHouseManager
 
 
@@ -42,7 +46,15 @@ def task_download_files(**context):
     # Valider la présence des fichiers requis
     if not validate_files(downloaded_files):
         raise ValueError("Fichiers manquants")
-    
+
+    # Valider que chaque fichier est dans un format autorisé pour son type
+    file_formats = {}
+    for file_type, path in downloaded_files.items():
+        fmt = detect_format(path)
+        validate_format(file_type, fmt)  # lève ValueError si non autorisé
+        file_formats[file_type] = fmt
+        print(f"  ✓ {file_type}: format '{fmt}' OK")
+
     update_etl_status(batch_id, ETLStatus.VALIDATING, 20)
     
     # Créer la base ClickHouse
@@ -57,31 +69,60 @@ def task_download_files(**context):
         'batch_id': batch_id,
         's3_prefix': s3_prefix,
         'files': downloaded_files,
+        'file_formats': file_formats,
         'local_dir': f"/tmp/etl_{client_id}_{batch_id}"
     }
 
 
 def task_process_plan_compte(**context):
-    """Parse et charge le Plan Comptable."""
+    """Parse et charge le Plan Comptable + détecte le plan source (PCG/SYSCOHADA)."""
     ti = context['ti']
     data = ti.xcom_pull(task_ids='download_files')
-    
+
     client_id = data['client_id']
     batch_id = data['batch_id']
     file_path = data['files'].get('plan_comptes')
-    
+
     if not file_path:
         print("⚠️ Fichier Plan Comptable non trouvé")
         return
-    
+
     result = parse_plan_compte(file_path, client_id)
-    
+
+    # Détection du plan source à partir des comptes du plan comptable.
+    # data = [(compte, type, intitule, nature), ...] → col[0] = compte
+    comptes = [row[0] for row in result['data']]
+    plan_source = detect_plan_source(comptes)
+    print(f"  📋 Plan source détecté (plan_compte): {plan_source}")
+
+    # Si le plan source est PCG, on mappe les comptes en SYSCOHADA avant
+    # insertion. Ainsi la table plan_compte ClickHouse reste toujours en
+    # référentiel SYSCOHADA, et les lookups d'intitulés depuis le grand livre
+    # (déjà mappé) fonctionnent correctement.
+    final_data = result['data']
+    if plan_source == 'PCG':
+        mapped_data = []
+        nb_mapped = 0
+        nb_unmapped = 0
+        for compte, type_c, intitule, nature in final_data:
+            m = map_compte(compte)
+            mapped_data.append((m['compte_syscohada'], type_c, intitule, nature))
+            if m['mapping_status'] == 'unmapped':
+                nb_unmapped += 1
+            else:
+                nb_mapped += 1
+        final_data = mapped_data
+        print(f"  🔁 Plan_compte mappé PCG→SYSCO: {nb_mapped} mappés, {nb_unmapped} non mappés (conservés)")
+
     with ClickHouseManager() as ch:
-        ch.upsert_dimension(client_id, 'plan_compte', result['data'])
-    
+        ch.upsert_dimension(client_id, 'plan_compte', final_data)
+
     update_etl_status(batch_id, ETLStatus.VALIDATING, 40)
-    
-    return result['stats']
+
+    return {
+        **result['stats'],
+        'plan_source': plan_source,
+    }
 
 
 def task_process_code_journal(**context):
@@ -108,49 +149,120 @@ def task_process_code_journal(**context):
 
 
 def task_process_plan_tiers(**context):
-    """Parse et charge le Plan Tiers."""
+    """Parse et charge le Plan Tiers (Excel ou .pnc Sage)."""
     ti = context['ti']
     data = ti.xcom_pull(task_ids='download_files')
-    
+
     client_id = data['client_id']
     batch_id = data['batch_id']
     file_path = data['files'].get('plan_tiers')
-    
+    file_format = data['file_formats'].get('plan_tiers')
+
     if not file_path:
         print("⚠️ Fichier Plan Tiers non trouvé")
         return
-    
-    result = parse_plan_tiers(file_path, client_id)
-    
+
+    # Dispatch selon format
+    if file_format == 'sage_pnc':
+        result = parse_sage_pnc(file_path, client_id)
+    else:
+        result = parse_plan_tiers(file_path, client_id)
+
     with ClickHouseManager() as ch:
         ch.upsert_dimension(client_id, 'plan_tiers', result['data'])
-    
+
     update_etl_status(batch_id, ETLStatus.VALIDATING, 60)
-    
+
     return result['stats']
 
 
 def task_process_grand_livre(**context):
-    """Parse, enrichit et charge le Grand Livre."""
+    """Parse, enrichit et charge le Grand Livre (Excel ou .pnm Sage).
+
+    Validations bloquantes :
+    - Période : transactions hors [periodStart, periodEnd] → fail (RAN exempté)
+    - Équilibre : sum(debit) != sum(credit) → fail
+    - Cohérence : plan source du grand livre vs plan_compte → fail si divergent
+    """
     ti = context['ti']
     data = ti.xcom_pull(task_ids='download_files')
-    
+
     client_id = data['client_id']
     batch_id = data['batch_id']
     file_path = data['files'].get('grand_livre')
-    
+    file_format = data['file_formats'].get('grand_livre')
+
     if not file_path:
         raise ValueError("Fichier Grand Livre non trouvé")
-    
+
     update_etl_status(batch_id, ETLStatus.PROCESSING, 70)
-    
-    # Parser le Grand Livre
-    result = parse_grand_livre(file_path, client_id, batch_id)
-    
+
+    # Récupérer la période depuis comptable_periods (utilisée par les 2 formats)
+    batch_info = get_batch_info(batch_id)
+    if not batch_info:
+        raise ValueError(
+            f"Impossible de récupérer la période du batch {batch_id} "
+            f"depuis comptable_periods (requise pour la validation)"
+        )
+    period_start = batch_info['start_date']
+    period_end = batch_info['end_date']
+
+    # Dispatch selon format
+    if file_format == 'sage_pnm':
+        result = parse_sage_pnm(
+            file_path,
+            client_id,
+            batch_id,
+            period_start=period_start,
+            period_end=period_end,
+        )
+    else:
+        result = parse_grand_livre(
+            file_path,
+            client_id,
+            batch_id,
+            period_start=period_start,
+            period_end=period_end,
+        )
+
+    # Validation d'équilibre Débit/Crédit (bloquante)
+    stats = result['stats']
+    total_debit = stats.get('total_debit', 0)
+    total_credit = stats.get('total_credit', 0)
+    if not stats.get('equilibre', False):
+        raise ValueError(
+            f"Grand Livre déséquilibré: "
+            f"Débit={total_debit:,.2f} ≠ Crédit={total_credit:,.2f} "
+            f"(écart={total_debit - total_credit:,.2f})"
+        )
+
+    # Validation cohérence inter-fichiers : plan source GL vs plan_compte.
+    # Les valeurs 'UNKNOWN' (fichier sans comptes financiers discriminants)
+    # ne déclenchent pas de fail.
+    comptes_gl = sorted({row[2] for row in result['data']})
+    plan_source_gl = detect_plan_source(comptes_gl)
+    pc_stats = ti.xcom_pull(task_ids='process_plan_compte') or {}
+    plan_source_pc = pc_stats.get('plan_source', 'UNKNOWN')
+    print(f"  📋 Plan source — grand_livre: {plan_source_gl} | plan_compte: {plan_source_pc}")
+    if plan_source_gl != 'UNKNOWN' and plan_source_pc != 'UNKNOWN':
+        if plan_source_gl != plan_source_pc:
+            raise ValueError(
+                f"Incohérence de plan comptable détectée: "
+                f"plan_compte = {plan_source_pc}, grand_livre = {plan_source_gl}. "
+                f"Tous les fichiers d'un même batch doivent être dans le même plan."
+            )
+
     with ClickHouseManager() as ch:
-        # Enrichir avec rubriques et infos tiers
-        enriched_data = enrich_grand_livre(client_id, result['data'], ch)
-        
+        # Enrichir avec rubriques + infos tiers + mapping PCG→SYSCO si applicable.
+        # On utilise le plan détecté sur le grand livre lui-même (cohérence déjà
+        # vérifiée plus haut avec plan_compte).
+        enriched_data = enrich_grand_livre(
+            client_id,
+            result['data'],
+            ch,
+            plan_source=plan_source_gl,
+        )
+
         # Charger dans ClickHouse
         ch.upsert_grand_livre(
             client_id,
@@ -158,11 +270,12 @@ def task_process_grand_livre(**context):
             result['periode'],
             batch_id
         )
-    
+
     update_etl_status(batch_id, ETLStatus.PROCESSING, 85)
-    
+
     return {
         'periode': result['periode'],
+        'plan_source': plan_source_gl,
         'stats': result['stats']
     }
 

@@ -46,25 +46,26 @@ def export_grand_livre_excel(
         
         print(f"  → {len(data)} transactions à exporter")
         
-        # Créer le DataFrame
+        # Créer le DataFrame (22 colonnes)
         columns = [
             'Date GL', 'Entité', 'Compte', 'Intitulé Compte', 'Rubrique',
             'Date Transaction', 'Code Journal', 'N° Pièce', 'N° Facture',
             'Libellé', 'N° Tiers', 'Intitulé Tiers', 'Type Tiers',
-            'Débit', 'Crédit', 'Solde', 'Période', 'Batch ID', 'Row ID'
+            'Débit', 'Crédit', 'Solde', 'Période', 'Batch ID', 'Row ID',
+            'Compte PCG Origine', 'HAO', 'Mapping Status',
         ]
-        
+
         df = pd.DataFrame(data, columns=columns)
-        
+
         # Générer le nom du fichier
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"GRAND_LIVRE_{client_id}_{timestamp}.xlsx"
         local_path = f"/tmp/{filename}"
-        
+
         # Écrire le fichier Excel
         with pd.ExcelWriter(local_path, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Grand Livre', index=False)
-            
+
             # Ajuster la largeur des colonnes
             worksheet = writer.sheets['Grand Livre']
             column_widths = {
@@ -87,8 +88,11 @@ def export_grand_livre_excel(
                 'Q': 8,   # Période
                 'R': 36,  # Batch ID
                 'S': 8,   # Row ID
+                'T': 15,  # Compte PCG Origine
+                'U': 5,   # HAO
+                'V': 18,  # Mapping Status
             }
-            
+
             for col, width in column_widths.items():
                 worksheet.column_dimensions[col].width = width
         

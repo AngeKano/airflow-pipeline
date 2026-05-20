@@ -3,9 +3,10 @@ Parser pour le Grand Livre Comptable (GRAND_LIVRE_COMPTABLE.xlsx)
 Fichier unique contenant les comptes, transactions, tiers et factures
 Extraction robuste par patterns - ignore les colonnes vides
 """
+from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple, Union
+
 import pandas as pd
-import re
-from typing import Dict, List, Tuple, Optional
 
 from etl.parsers.base import (
     is_valid, clean, get_cell, compact_row, get_values_only,
@@ -14,6 +15,19 @@ from etl.parsers.base import (
     parse_amount, format_date_fr, format_date_iso,
     extract_periode_from_date, extract_file_metadata
 )
+
+# Journaux des À-Nouveaux : exemptés de la validation période (reprise N-1).
+RAN_JOURNAUX = {'RAN', 'AN'}
+
+
+def _to_date(val: Union[None, str, date, datetime]) -> Optional[date]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    return pd.to_datetime(val).date()
 
 
 def detect_line_type(row: list) -> str:
@@ -162,13 +176,25 @@ def extract_transaction_from_row(row: list) -> Dict[str, any]:
     }
 
 
-def parse_grand_livre(file_path: str, client_id: str, batch_id: str) -> Dict:
+def parse_grand_livre(
+    file_path: str,
+    client_id: str,
+    batch_id: str,
+    period_start: Union[None, str, date, datetime] = None,
+    period_end: Union[None, str, date, datetime] = None,
+) -> Dict:
     """
     Parse le Grand Livre Comptable unifié.
-    
+
     Parcourt le fichier et maintient le contexte du compte courant.
     Chaque transaction hérite du compte auquel elle appartient.
-    
+
+    Args:
+        file_path / client_id / batch_id : standard.
+        period_start / period_end : si fournis, toute transaction (hors journal
+            RAN) dont la date sort de [period_start, period_end] lève
+            ValueError au premier hors-période détecté.
+
     Retourne: {
         data: [(date_gl, entite, compte, intitule_compte, date_trans, code_journal,
                 numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
@@ -178,7 +204,10 @@ def parse_grand_livre(file_path: str, client_id: str, batch_id: str) -> Dict:
     }
     """
     print(f"📄 Lecture du Grand Livre: {file_path}")
-    
+
+    period_start_d = _to_date(period_start)
+    period_end_d = _to_date(period_end)
+
     df = pd.read_excel(file_path, header=None, dtype=str)
     data_list = df.values.tolist()
     
@@ -213,8 +242,24 @@ def parse_grand_livre(file_path: str, client_id: str, batch_id: str) -> Dict:
             
         elif line_type == 'transaction':
             trans = extract_transaction_from_row(row)
+
+            # Validation période — RAN exempté (reprise N-1)
+            if period_start_d and period_end_d and trans['date_iso']:
+                code_journal = trans.get('code_journal', '').upper()
+                if code_journal not in RAN_JOURNAUX:
+                    try:
+                        d_trans = datetime.strptime(trans['date_iso'], '%Y-%m-%d').date()
+                    except (ValueError, TypeError):
+                        d_trans = None
+                    if d_trans and (d_trans < period_start_d or d_trans > period_end_d):
+                        raise ValueError(
+                            f"Ligne {i + 1}: date {d_trans.isoformat()} hors période "
+                            f"[{period_start_d.isoformat()}, {period_end_d.isoformat()}] "
+                            f"(journal {code_journal}, compte {compte_courant.get('numero', '?')})"
+                        )
+
             row_id += 1
-            
+
             # Construire le tuple pour ClickHouse
             # (date_gl, entite, compte, intitule_compte, date_trans, code_journal,
             #  numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
