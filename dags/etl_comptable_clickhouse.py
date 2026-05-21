@@ -392,21 +392,48 @@ def task_finalize(**context):
 
 
 def task_handle_failure(**context):
-    """Gère les erreurs de l'ETL."""
+    """
+    Gère les erreurs de l'ETL avec rollback ClickHouse.
+
+    Politique : aucun passif. Si une seule étape échoue, on supprime toutes
+    les données du batch dans ClickHouse pour ne laisser aucune donnée
+    partielle/incohérente. Le statut Postgres passe en FAILED avec
+    progress=100 (le traitement est "terminé" du point de vue utilisateur,
+    accompagné d'un message d'erreur affiché dans le front).
+    """
     ti = context['ti']
     data = ti.xcom_pull(task_ids='download_files')
-    
-    if data:
-        batch_id = data.get('batch_id')
-        local_dir = data.get('local_dir')
-        
-        if batch_id:
-            update_etl_status(batch_id, ETLStatus.FAILED, 0)
-        
-        if local_dir:
-            cleanup_local_files(local_dir)
-    
-    print("❌ ETL ÉCHOUÉ")
+
+    # batch_id et client_id : depuis XCom si download_files a réussi,
+    # sinon depuis les params du DAG run (cas où download_files fail direct).
+    params = context.get('params', {}) or {}
+    batch_id = (data or {}).get('batch_id') or params.get('batch_id')
+    client_id = (data or {}).get('client_id') or params.get('client_id')
+    local_dir = (data or {}).get('local_dir')
+
+    print("❌ ETL ÉCHOUÉ — démarrage du rollback")
+
+    # 1. Cleanup ClickHouse : supprimer toutes les données du batch
+    if batch_id and client_id:
+        try:
+            with ClickHouseManager() as ch:
+                ch.delete_batch(client_id, batch_id)
+            print(f"  🧹 Données ClickHouse du batch {batch_id} supprimées")
+        except Exception as e:
+            # Best-effort : si la DB n'existe pas ou si la connexion échoue,
+            # on log mais on ne masque pas l'erreur métier d'origine.
+            print(f"  ⚠️ Cleanup ClickHouse impossible: {e}")
+
+    # 2. Statut FAILED + progress=100 (le traitement est "terminé" côté UX,
+    #    avec un message d'erreur déjà propagé via _capture_error en amont)
+    if batch_id:
+        update_etl_status(batch_id, ETLStatus.FAILED, 100)
+
+    # 3. Nettoyer les fichiers temporaires locaux
+    if local_dir:
+        cleanup_local_files(local_dir)
+
+    print("❌ ETL ÉCHOUÉ — rollback terminé")
 
 
 # ============================================================

@@ -9,8 +9,11 @@ from datetime import timedelta
 # ========================================
 DEFAULT_ARGS = {
     'owner': 'envol',
-    'retries': 1,
-    'retry_delay': timedelta(minutes=2),
+    # retries=0 : en cas d'échec d'une tâche, on bascule immédiatement en
+    # FAILED sans attendre un retry. L'utilisateur peut relancer manuellement
+    # depuis le front via le bouton "Relancer le traitement".
+    'retries': 0,
+    'retry_delay': timedelta(seconds=30),
 }
 
 # ========================================
