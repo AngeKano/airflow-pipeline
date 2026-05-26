@@ -39,13 +39,27 @@ class PLEManager(ClickHouseBase):
         self.populate(client_id)
 
     def get_rubrique(self, client_id: str, compte: str) -> str:
-        """Retourne la rubrique pour un compte donné."""
-        db_name = self._get_db_name(client_id)
+        """
+        Retourne la rubrique pour un compte donné.
 
-        for nb_chars in [4, 3]:
+        Lookup hiérarchique (le plus précis l'emporte) :
+        1. Compte exact 6 chiffres (mapping fin issu de l'Excel Mapping PL DEF)
+        2. Racine 4 chiffres (sous-famille comptable)
+        3. Racine 3 chiffres (famille comptable)
+
+        Renvoie '' si aucun mapping trouvé.
+        """
+        db_name = self._get_db_name(client_id)
+        compte = (compte or '').strip()
+        if not compte:
+            return ''
+
+        for nb_chars in [6, 4, 3]:
+            if len(compte) < nb_chars:
+                continue
             racine = compte[:nb_chars]
             result = self._execute(f"""
-                SELECT rubrique FROM {db_name}.ple 
+                SELECT rubrique FROM {db_name}.ple
                 WHERE racine = %(racine)s AND nb_racine = %(nb)s
             """, {'racine': racine, 'nb': nb_chars})
             if result:
