@@ -53,6 +53,9 @@ class ClickHouseManager:
     def get_rubrique(self, client_id: str, compte: str) -> str:
         return self.ple.get_rubrique(client_id, compte)
 
+    def get_bilan_rubrique(self, client_id: str, compte: str, solde_signed: float = 0.0) -> str:
+        return self.ple.get_bilan_rubrique(client_id, compte, solde_signed)
+
     # Méthodes déléguées - Grand Livre
     def upsert_grand_livre(self, client_id: str, data: List[Tuple], periode: str, batch_id: str):
         return self.grand_livre.upsert(client_id, data, periode, batch_id)

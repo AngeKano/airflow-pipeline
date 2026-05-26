@@ -34,11 +34,11 @@ def enrich_grand_livre(
          numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
          periode, batch_id, row_id)
 
-    Format de sortie (22 colonnes — aligné sur la table ClickHouse grand_livre):
+    Format de sortie (23 colonnes — aligné sur la table ClickHouse grand_livre):
         (date_gl, entite, compte, intitule_compte, rubrique, date_trans, code_journal,
          numero_piece, numero_facture, libelle, n_tiers, intitule_tiers, type_tiers,
          debit, credit, solde, periode, batch_id, row_id,
-         compte_pcg_origine, is_hao, mapping_status)
+         compte_pcg_origine, is_hao, mapping_status, bilan_rubrique)
 
     Args:
         plan_source: 'PCG' | 'SYSCOHADA' | 'UNKNOWN'. Seul 'PCG' déclenche le mapping.
@@ -66,6 +66,7 @@ def enrich_grand_livre(
 
     # Caches (les lookups ClickHouse sont coûteux)
     rubrique_cache: Dict[str, str] = {}
+    bilan_rubrique_cache: Dict[tuple, str] = {}  # (compte, solde_sign) → bilan_rubrique
     tiers_cache: Dict[str, Dict[str, str]] = {}
     mapping_cache: Dict[str, Dict[str, object]] = {}
 
@@ -91,12 +92,26 @@ def enrich_grand_livre(
                 is_hao = 0
                 mapping_status = 'none'
 
-            # --- Rubrique (lookup PLE basé sur le compte final SYSCOHADA) ---
+            # --- Rubrique P&L (lookup PLE basé sur le compte final SYSCOHADA) ---
             if compte_final not in rubrique_cache:
                 rubrique_cache[compte_final] = ch_manager.get_rubrique(client_id, compte_final)
             rubrique = rubrique_cache[compte_final]
             if rubrique:
                 stats['with_rubrique'] += 1
+
+            # --- Rubrique Bilan (lookup avec filtre solde) ---
+            # Le solde signé (debit - credit) détermine si on tombe dans les
+            # filtres "solde débiteur" ou "solde créditeur" du référentiel.
+            solde_signed = float(debit) - float(credit)
+            solde_sign = 1 if solde_signed > 0 else (-1 if solde_signed < 0 else 0)
+            cache_key = (compte_final, solde_sign)
+            if cache_key not in bilan_rubrique_cache:
+                bilan_rubrique_cache[cache_key] = ch_manager.get_bilan_rubrique(
+                    client_id, compte_final, solde_signed,
+                )
+            bilan_rubrique = bilan_rubrique_cache[cache_key]
+            if bilan_rubrique:
+                stats['with_bilan'] = stats.get('with_bilan', 0) + 1
 
             # --- Tiers (intitulé + type) ---
             intitule_tiers = ""
@@ -136,9 +151,11 @@ def enrich_grand_livre(
                 compte_pcg_origine,
                 is_hao,
                 mapping_status,
+                bilan_rubrique,
             ))
 
-        print(f"  ✓ {stats['with_rubrique']} transactions avec rubrique")
+        print(f"  ✓ {stats['with_rubrique']} transactions avec rubrique P&L")
+        print(f"  ✓ {stats.get('with_bilan', 0)} transactions avec rubrique Bilan")
         print(f"  ✓ {stats['with_tiers_info']} transactions avec infos tiers")
         if apply_mapping:
             print(f"  ✓ Mapping PCG→SYSCO: "

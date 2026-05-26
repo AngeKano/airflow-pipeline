@@ -46,13 +46,13 @@ def export_grand_livre_excel(
         
         print(f"  → {len(data)} transactions à exporter")
         
-        # Créer le DataFrame (22 colonnes)
+        # Créer le DataFrame (23 colonnes)
         columns = [
             'Date GL', 'Entité', 'Compte', 'Intitulé Compte', 'Rubrique',
             'Date Transaction', 'Code Journal', 'N° Pièce', 'N° Facture',
             'Libellé', 'N° Tiers', 'Intitulé Tiers', 'Type Tiers',
             'Débit', 'Crédit', 'Solde', 'Période', 'Batch ID', 'Row ID',
-            'Compte PCG Origine', 'HAO', 'Mapping Status',
+            'Compte PCG Origine', 'HAO', 'Mapping Status', 'Rubrique Bilan',
         ]
 
         df = pd.DataFrame(data, columns=columns)
@@ -91,6 +91,7 @@ def export_grand_livre_excel(
                 'T': 15,  # Compte PCG Origine
                 'U': 5,   # HAO
                 'V': 18,  # Mapping Status
+                'W': 14,  # Rubrique Bilan
             }
 
             for col, width in column_widths.items():
