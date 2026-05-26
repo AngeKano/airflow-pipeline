@@ -34,11 +34,13 @@ def enrich_grand_livre(
          numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
          periode, batch_id, row_id)
 
-    Format de sortie (23 colonnes — aligné sur la table ClickHouse grand_livre):
-        (date_gl, entite, compte, intitule_compte, rubrique, date_trans, code_journal,
-         numero_piece, numero_facture, libelle, n_tiers, intitule_tiers, type_tiers,
-         debit, credit, solde, periode, batch_id, row_id,
-         compte_pcg_origine, is_hao, mapping_status, bilan_rubrique)
+    Format de sortie (23 colonnes — aligné sur la table ClickHouse grand_livre,
+    rubrique P&L et bilan_rubrique côte à côte après intitule_compte) :
+        (date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
+         date_trans, code_journal, numero_piece, numero_facture, libelle,
+         n_tiers, intitule_tiers, type_tiers, debit, credit, solde,
+         periode, batch_id, row_id,
+         compte_pcg_origine, is_hao, mapping_status)
 
     Args:
         plan_source: 'PCG' | 'SYSCOHADA' | 'UNKNOWN'. Seul 'PCG' déclenche le mapping.
@@ -134,6 +136,7 @@ def enrich_grand_livre(
                 compte_final,
                 intitule_compte,
                 rubrique,
+                bilan_rubrique,
                 date_trans,
                 code_journal,
                 numero_piece,
@@ -151,7 +154,6 @@ def enrich_grand_livre(
                 compte_pcg_origine,
                 is_hao,
                 mapping_status,
-                bilan_rubrique,
             ))
 
         print(f"  ✓ {stats['with_rubrique']} transactions avec rubrique P&L")

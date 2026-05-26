@@ -9,13 +9,17 @@ from clickhouse.base import ClickHouseBase
 class GrandLivreManager(ClickHouseBase):
     """Gestion du Grand Livre unifié"""
 
-    # Colonnes requises avec leur type et valeur par défaut
+    # Colonnes requises avec leur type et valeur par défaut.
+    # `rubrique` (P&L) et `bilan_rubrique` sont placés côte à côte juste
+    # après intitule_compte pour faciliter la lecture (analyse économique
+    # à gauche, analyse patrimoniale à droite).
     REQUIRED_COLUMNS = {
         'date_gl': ('String', None),
         'entite': ('String', None),
         'compte': ('String', None),
         'intitule_compte': ('String', "''"),
         'rubrique': ('String', "''"),
+        'bilan_rubrique': ('String', "''"),
         'date_transaction': ('String', None),
         'code_journal': ('String', None),
         'numero_piece': ('String', None),
@@ -34,8 +38,6 @@ class GrandLivreManager(ClickHouseBase):
         'compte_pcg_origine': ('String', "''"),
         'is_hao': ('UInt8', '0'),
         'mapping_status': ('String', "'none'"),
-        # Rubrique bilan SYSCOHADA (code AD-DZ) — calculée lors de l'enrichissement
-        'bilan_rubrique': ('String', "''"),
         'updated_at': ('DateTime', 'now()'),
     }
 
@@ -50,6 +52,7 @@ class GrandLivreManager(ClickHouseBase):
                 compte String,
                 intitule_compte String DEFAULT '',
                 rubrique String DEFAULT '',
+                bilan_rubrique String DEFAULT '',
                 date_transaction String,
                 code_journal String,
                 numero_piece String,
@@ -67,7 +70,6 @@ class GrandLivreManager(ClickHouseBase):
                 compte_pcg_origine String DEFAULT '',
                 is_hao UInt8 DEFAULT 0,
                 mapping_status String DEFAULT 'none',
-                bilan_rubrique String DEFAULT '',
                 updated_at DateTime DEFAULT now()
             ) ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (batch_id, periode, compte, date_transaction, code_journal, numero_piece, row_id)
@@ -114,12 +116,13 @@ class GrandLivreManager(ClickHouseBase):
         """
         Insère les transactions du Grand Livre.
 
-        Format data attendu (23 colonnes):
-        (date_gl, entite, compte, intitule_compte, rubrique, date_transaction,
-         code_journal, numero_piece, numero_facture, libelle_ecriture,
-         n_tiers, intitule_tiers, type_tiers, debit, credit, solde,
-         periode, batch_id, row_id,
-         compte_pcg_origine, is_hao, mapping_status, bilan_rubrique)
+        Format data attendu (23 colonnes — rubrique P&L et bilan_rubrique
+        côte à côte juste après intitule_compte) :
+        (date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
+         date_transaction, code_journal, numero_piece, numero_facture,
+         libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
+         debit, credit, solde, periode, batch_id, row_id,
+         compte_pcg_origine, is_hao, mapping_status)
         """
         if not data:
             print("⚠️ Aucune transaction à insérer")
@@ -148,11 +151,11 @@ class GrandLivreManager(ClickHouseBase):
 
         query = f"""
             INSERT INTO {db_name}.grand_livre (
-                date_gl, entite, compte, intitule_compte, rubrique,
+                date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
                 date_transaction, code_journal, numero_piece, numero_facture,
                 libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
                 debit, credit, solde, periode, batch_id, row_id,
-                compte_pcg_origine, is_hao, mapping_status, bilan_rubrique
+                compte_pcg_origine, is_hao, mapping_status
             ) VALUES
         """
         self._execute(query, data)
@@ -197,11 +200,11 @@ class GrandLivreManager(ClickHouseBase):
 
         return self._execute(f"""
             SELECT
-                date_gl, entite, compte, intitule_compte, rubrique,
+                date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
                 date_transaction, code_journal, numero_piece, numero_facture,
                 libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
                 debit, credit, solde, periode, batch_id, row_id,
-                compte_pcg_origine, is_hao, mapping_status, bilan_rubrique
+                compte_pcg_origine, is_hao, mapping_status
             FROM {db_name}.grand_livre
             WHERE batch_id = %(batch_id)s
             ORDER BY compte, date_transaction, row_id
