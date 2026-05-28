@@ -26,16 +26,24 @@ class BilanMapping(NamedTuple):
     exclusions: Tuple[str, ...]  # racines à exclure (ex: ('419',))
 
 
-# Codes bilan de référence : 2 lettres majuscules, suivies optionnellement
-# d'un chiffre pour les subdivisions (DK1, DK2, DK3, etc.).
-_RE_CODE_BILAN = re.compile(r'^[A-Z]{2}\d?$')
+# Codes bilan de référence : 2 à 4 lettres majuscules, suivies optionnellement
+# d'un chiffre pour les subdivisions :
+#   AE, BZ            (codes principaux 2 lettres)
+#   DK1, DK2, DK3     (subdivisions DK passif)
+#   BSA, BSB, BSC     (subdivisions BS trésorerie)
+#   AKL1, AKL2        (fusion AK + AL pour amortissements)
+#   AMN               (fusion AM + AN provisions)
+#   RPCP, RPCF        (codes annexes régularisation/risques)
+#   CCA, PCA          (charges/produits constatés d'avance)
+_RE_CODE_BILAN = re.compile(r'^[A-Z]{2,4}\d?$')
 
 # Filtre solde dans une expression
 _RE_SOLDE = re.compile(r'\(solde\s+(débiteur|crediteur|créditeur|debiteur)\)', re.IGNORECASE)
 
-# Exclusions globales ("sauf X, Y, Z")
+# Exclusions globales ("sauf X, Y, Z" ou "sauf X; Y; Z")
 _RE_SAUF = re.compile(r'\(?sauf\s+([^)]+?)\)?(?:$|,(?!\s*(?:\d|et\s)))', re.IGNORECASE)
-_RE_INLINE_SAUF = re.compile(r'sauf\s+([\d\s,et]+)', re.IGNORECASE)
+# Accepte chiffres, espaces, virgules, point-virgules et "et" comme séparateurs.
+_RE_INLINE_SAUF = re.compile(r'sauf\s+([\d\s,;et]+)', re.IGNORECASE)
 
 
 def _is_code_bilan(token: str) -> bool:
@@ -80,8 +88,8 @@ def _extract_exclusions(expr: str) -> List[str]:
     m = _RE_INLINE_SAUF.search(expr)
     if m:
         raw = m.group(1)
-        # Nettoyer "471, 478 et 488" → ['471','478','488']
-        raw = raw.replace(' et ', ',').replace(' ET ', ',')
+        # Normaliser tous les séparateurs en virgules
+        raw = raw.replace(' et ', ',').replace(' ET ', ',').replace(';', ',')
         for tok in raw.split(','):
             t = tok.strip().strip('()')
             if t.isdigit():
@@ -90,11 +98,16 @@ def _extract_exclusions(expr: str) -> List[str]:
 
 
 def _clean_expression(expr: str) -> str:
-    """Retire les parenthèses, filtres solde et clauses sauf — garde le core des comptes."""
+    """
+    Retire les parenthèses, filtres solde et clauses sauf — garde le core des comptes.
+    Nettoie aussi les espaces à l'intérieur des nombres (ex: '2 811' → '2811').
+    """
     s = expr
     s = _RE_SOLDE.sub('', s)        # retirer (solde ...)
     s = _RE_INLINE_SAUF.sub('', s)  # retirer "sauf ..."
     s = re.sub(r'\([^)]*\)', '', s) # retirer parenthèses résiduelles
+    # Nettoyer les espaces dans les nombres : "2 811" → "2811"
+    s = re.sub(r'(\d)\s+(\d)', r'\1\2', s)
     return s.strip(' ,;')
 
 
@@ -126,7 +139,7 @@ def parse_bilan_expression(code_bilan: str, expression: str) -> ParsedBilanLine:
     expr = (expression or '').strip()
 
     # --- 1. Composition de rubriques ("AE+AF+AG+AH" ou "Somme CA à CM") ---
-    # Pattern Somme X à Y
+    # Pattern Somme X à Y (codes 2 lettres)
     m_somme = re.match(
         r'^somme\s+([A-Z]{2})\s+(?:à|a)\s+([A-Z]{2})$',
         expr,
@@ -135,7 +148,6 @@ def parse_bilan_expression(code_bilan: str, expression: str) -> ParsedBilanLine:
     if m_somme:
         start, end = m_somme.group(1).upper(), m_somme.group(2).upper()
         # Générer la liste des codes alphabétiques entre start et end (ex: CA, CB, ..., CM)
-        # Suppose même 1er caractère
         if start[0] == end[0]:
             children = tuple(
                 f'{start[0]}{chr(c)}'
@@ -174,14 +186,18 @@ def parse_bilan_expression(code_bilan: str, expression: str) -> ParsedBilanLine:
     # Étape A : extraire filtre solde et exclusions globales
     global_exclusions = _extract_exclusions(expr)
 
-    # Étape B : nettoyer pour ne garder que les comptes
+    # Étape B : normaliser les séparateurs (`;` équivalent à `,` dans le DSL)
+    # avant le découpage des tokens.
+    expr_norm = expr.replace(';', ',')
+
+    # Étape C : nettoyer pour ne garder que les comptes
     # Mais attention : un filtre solde peut être attaché à UN compte spécifique
     # dans une liste (ex: "471 (solde débiteur), 478"), donc on parse token par token
     mappings: List[BilanMapping] = []
 
     # Découper sur la virgule (séparateur union)
     # On découpe d'abord en gardant les parenthèses associées au token précédent
-    tokens = _smart_split(expr, ',')
+    tokens = _smart_split(expr_norm, ',')
     for tok in tokens:
         tok = tok.strip()
         if not tok:
