@@ -36,7 +36,7 @@ DIMENSION_CONFIG = {
         'pk_index': 0,
     },
     'plan_compte': {
-        'columns': '(compte, type, intitule_compte, nature_compte)',
+        'columns': '(compte, intitule_compte, nature_compte)',
         'pk_column': 'compte',
         'pk_index': 0,
     },

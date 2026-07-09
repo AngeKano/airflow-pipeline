@@ -119,7 +119,7 @@ def task_process_plan_compte(**context):
     result = parse_plan_compte(file_path, client_id)
 
     # Détection du plan source à partir des comptes du plan comptable.
-    # data = [(compte, type, intitule, nature), ...] → col[0] = compte
+    # data = [(compte, intitule, nature), ...] → col[0] = compte
     comptes = [row[0] for row in result['data']]
     plan_source = detect_plan_source(comptes)
     print(f"  📋 Plan source détecté (plan_compte): {plan_source}")
@@ -133,9 +133,9 @@ def task_process_plan_compte(**context):
         mapped_data = []
         nb_mapped = 0
         nb_unmapped = 0
-        for compte, type_c, intitule, nature in final_data:
+        for compte, intitule, nature in final_data:
             m = map_compte(compte)
-            mapped_data.append((m['compte_syscohada'], type_c, intitule, nature))
+            mapped_data.append((m['compte_syscohada'], intitule, nature))
             if m['mapping_status'] == 'unmapped':
                 nb_unmapped += 1
             else:

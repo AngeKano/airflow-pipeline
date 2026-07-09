@@ -30,7 +30,6 @@ class DimensionManager(ClickHouseBase):
         self._execute(f"""
             CREATE TABLE IF NOT EXISTS {db_name}.plan_compte (
                 compte String,
-                type String,
                 intitule_compte String,
                 nature_compte String,
                 updated_at DateTime DEFAULT now()
