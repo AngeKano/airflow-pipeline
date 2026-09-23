@@ -186,6 +186,15 @@ def parse_bilan_expression(code_bilan: str, expression: str) -> ParsedBilanLine:
     # Étape A : extraire filtre solde et exclusions globales
     global_exclusions = _extract_exclusions(expr)
 
+    # Filtre solde GLOBAL : uniquement si l'expression COMMENCE par le marqueur
+    # "(solde débiteur/créditeur)". Il s'applique alors à tous les comptes de la
+    # ligne (ex: "(solde débiteur) 185;42;43;..."). Un marqueur situé après un
+    # compte reste local à ce compte (ex: "471 (solde débiteur), 478"), ce qui
+    # préserve les listes mixtes.
+    global_solde = ''
+    if re.match(r'^\s*\(solde\s', expr, re.IGNORECASE):
+        global_solde = _detect_solde_filter(expr)
+
     # Étape B : normaliser les séparateurs (`;` équivalent à `,` dans le DSL)
     # avant le découpage des tokens.
     expr_norm = expr.replace(';', ',')
@@ -202,8 +211,8 @@ def parse_bilan_expression(code_bilan: str, expression: str) -> ParsedBilanLine:
         tok = tok.strip()
         if not tok:
             continue
-        # Détecter filtre solde local à ce token
-        local_solde = _detect_solde_filter(tok)
+        # Filtre solde : local au token, sinon global à la ligne
+        local_solde = _detect_solde_filter(tok) or global_solde
         # Nettoyer le token
         clean = _clean_expression(tok)
         # Reste plage ou compte ?

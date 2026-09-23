@@ -29,9 +29,10 @@ BILAN_REFERENCE: List[BilanRow] = [
     # ---- Actif immobilisé : Immobilisations incorporelles ----
     BilanRow('AD', 'Immobilisations incorporelles', 'AE+AF+AG+AH'),
     BilanRow('AD1', 'Amortissement des immobilisations incorporelles', 'AE1+AF1+AG1+AH1'),
-    BilanRow('AD2', 'Provisions pour dépréciation des immobilisations incorporelles', 'AF2+AG2+AH2'),
+    BilanRow('AD2', 'Provisions pour dépréciation des immobilisations incorporelles', 'AE2+AF2+AG2+AH2'),
     BilanRow('AE', 'Frais développement', '211;2191'),
     BilanRow('AE1', 'Amortissement des frais de recherche et de développement', '2811'),
+    BilanRow('AE2', 'Dépréciation des frais de recherche et de développement', '2911;2918;2919'),
     BilanRow('AF', 'Brevets licences logiciels', '212;213;2193;214'),
     BilanRow('AF1', 'Amortissement des brevets, licences, concessions et droits similaires, logiciels', '2812;2813;2814'),
     BilanRow('AF2', 'Provisions pour dépréciation des brevets, licences, concessions et droits similaires', '2912;2913;2914'),
@@ -39,25 +40,30 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('AG1', 'Amortissement du fonds commercial et droit au bail', '2815;2816'),
     BilanRow('AG2', 'Provisions pour dépréciation fonds commercial et droit au bail', '2915;2916'),
     BilanRow('AH', 'Autres incorporelles', '217;218;2198'),
-    BilanRow('AH1', 'Amortissement des biens incorporels', '2817;2818'),
-    BilanRow('AH2', 'Provisions pour dépréciation autres droits et valeurs', '2917;2918;2919'),
+    BilanRow('AH1', 'Amortissement des biens incorporels', '2817'),
+    BilanRow('AH2', 'Provisions pour dépréciation autres droits et valeurs', '2917'),
 
     # ---- Actif immobilisé : Immobilisations corporelles ----
+    # Éclatement des codes fusionnés bâtiments+installations (ex-AKL1/AKL2/AMN)
+    # en codes séparés AK1/AK2 (bâtiments) et AL1/AL2 (installations), + AM2/AN2.
     BilanRow('AI', 'Immobilisations corporelles', 'AJ+AK+AL+AM+AN+AP'),
-    BilanRow('AI1', 'Amortissement des immobilisations corporelles', 'AJ1+AKL1+AM1+AN1'),
-    BilanRow('AI2', 'Provisions pour dépréciation des immobilisations corporelles', 'AJ2+AKL2+AMN+AP2'),
+    BilanRow('AI1', 'Amortissement des immobilisations corporelles', 'AJ1+AK1+AL1+AM1+AN1'),
+    BilanRow('AI2', 'Provisions pour dépréciation des immobilisations corporelles', 'AJ2+AK2+AL2+AM2+AN2+AP2'),
     BilanRow('AJ', 'Terrains', '22'),
     BilanRow('AJ1', 'Amortissement des terrains', '282'),
     BilanRow('AJ2', 'Provisions pour dépréciation des terrains', '292'),
     BilanRow('AK', 'Bâtiments', '231;232;237;239'),
-    BilanRow('AL', 'Installations', '233;235;234;238'),
-    BilanRow('AKL1', 'Amortissements des bâtiments, installations techniques et agencements', '283'),
-    BilanRow('AKL2', 'Provisions pour dépréciation des bâtiments, installations techniques et agencements', '293'),
+    BilanRow('AK1', 'Amortissements des bâtiments', '2831;2832;2833;2837'),
+    BilanRow('AK2', 'Provisions pour dépréciation des bâtiments', '2931;2932;2933;2937;2939'),
+    BilanRow('AL', 'Installations', '235;234;238;2392;2393;2394;2395;2398'),
+    BilanRow('AL1', 'Amortissements des installations techniques et agencements', '2835;2834;2838'),
+    BilanRow('AL2', 'Provisions pour dépréciation des installations techniques et agencements', '2934;2935;2938'),
     BilanRow('AM', 'Matériel', '241;242;243;244;246;247;248;2491-2494;2496;2497;2498'),
     BilanRow('AM1', 'Amortissement du matériel', '284 sauf 2845'),
+    BilanRow('AM2', 'Dépréciation des autres matériels', '2941;2942;2943;2944;2946;2947;2948;2949'),
     BilanRow('AN', 'Transport', '245;2495'),
     BilanRow('AN1', 'Amortissement du matériel de transport', '2845'),
-    BilanRow('AMN', 'Provisions pour dépréciation de matériel', '294'),
+    BilanRow('AN2', 'Dépréciation du matériel de transport', '2945'),
     BilanRow('AP', 'Avances immobilisations', '25'),
     BilanRow('AP2', 'Provisions pour dépréciation des avances et acomptes sur immobilisations', '295'),
 
@@ -72,12 +78,16 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('AZ', 'Total actif immobilisé', 'AD+AI+AQ'),
 
     # ---- Actif circulant ----
-    BilanRow('BA', 'Actif Circulant HAO', '485;486;488'),
-    BilanRow('BB', 'Stocks et Encours', '31-38;39'),
+    BilanRow('BA', 'Actif Circulant HAO', '485;488'),
+    BilanRow('BA1', 'Dépréciations Actif Circulant HAO', '498'),
+    BilanRow('BB', 'Stocks et Encours', '31-38'),
     BilanRow('BG', 'Créances et Emplois Assimilés', 'BH+BI+BJ'),
     BilanRow('BH', 'Avances fournisseurs', '409'),
-    BilanRow('BI', 'Clients', '41 sauf 419'),
-    BilanRow('BJ', 'Autres créances', '4711;472;475'),
+    BilanRow('BH1', 'Dépréciation fournisseurs avances versées', '490'),
+    BilanRow('BI', 'Clients', '411;412;413;414;415;416;418'),
+    BilanRow('BI1', 'Dépréciations clients', '491'),
+    # BJ : autres créances = soldes DÉBITEURS des comptes de tiers à solde variable.
+    BilanRow('BJ', 'Autres créances', '(solde débiteur) 185;42;43;44;45;46;471;472;473;474;475;476;477'),
     BilanRow('BK', 'Total Actif Circulant', 'BA+BB+BG'),
 
     # ---- Trésorerie actif ----
@@ -91,42 +101,44 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('BSA', 'Caisse', '57'),
     BilanRow('BSB', 'Banques', '52'),
     BilanRow('BSC', 'Autres trésoreries', '53;54'),
-    BilanRow('RPCF', 'Risques provisionnés à caractère financier', '599'),
     BilanRow('BT', 'Total Trésorerie Actif', 'BQ+BR+BS'),
     BilanRow('BU', 'Écart conversion actif', '478'),
     BilanRow('BZ', 'Total actif', 'AZ+BK+BT+BU'),
 
     # ---- Capitaux propres ----
-    BilanRow('CA', 'Capital', '10 (sauf 105;106;109)'),
+    BilanRow('CA', 'Capital', '101;102;103;104'),
     BilanRow('CB', 'Capital non appelé', '109'),
     BilanRow('CD', 'Primes liées au capital', '105'),
     BilanRow('CE', 'Écart réévaluation', '106'),
     BilanRow('CF', 'Réserves indisponibles', '111;112;113'),
     BilanRow('CG', 'Réserves libres', '118'),
     BilanRow('CH', 'Report à nouveau', '12'),
-    BilanRow('CJ', 'Résultat', '13'),
+    BilanRow('CJ', 'Résultat', '131;139'),
     BilanRow('CL', 'Subventions', '14'),
     BilanRow('CM', 'Provisions réglementées', '15'),
     BilanRow('CP', 'Total capitaux propres', 'Somme CA à CM'),
 
     # ---- Dettes financières ----
-    BilanRow('DA', 'Emprunts', '16;18'),
+    BilanRow('DA', 'Emprunts', '16;181;182;183;184'),
     BilanRow('DB', 'Crédit bail', '17'),
     BilanRow('DC', 'Provisions LT', '19'),
     BilanRow('DD', 'Total Dettes Financières et Ressources assimilées', 'DA + DB + DC'),
     BilanRow('DF', 'Total ressources stables', 'CP+DD'),
 
     # ---- Passif circulant ----
-    BilanRow('DH', 'Dettes circulantes HAO', '481;482;483;484'),
+    BilanRow('DH', 'Dettes circulantes HAO', '481;482;484;4998'),
     BilanRow('DI', 'Clients avances reçues', '419'),
     BilanRow('DJ', 'Fournisseurs', '401-408'),
     # DK devient une composition pure : DK1 + DK2 + DK3
+    # DK1/DK2/DK3 : soldes CRÉDITEURS des comptes de tiers à solde variable
+    # (le solde débiteur de 42/43/44 est classé en BJ, actif).
     BilanRow('DK', 'Dettes fiscales et sociales', 'DK1+DK2+DK3'),
-    BilanRow('DK1', 'Dettes Personnel', '42'),
-    BilanRow('DK2', 'Dettes sociales', '43'),
-    BilanRow('DK3', 'Dettes fiscales', '44'),
-    BilanRow('DM', 'Autres dettes', '45;46;4712'),
-    BilanRow('DN', 'Provisions pour risques et charges à court terme', '49'),
+    BilanRow('DK1', 'Dettes Personnel', '(solde créditeur) 42'),
+    BilanRow('DK2', 'Dettes sociales', '(solde créditeur) 43'),
+    BilanRow('DK3', 'Dettes fiscales', '(solde créditeur) 44'),
+    # DM : autres dettes = soldes CRÉDITEURS des comptes de tiers à solde variable.
+    BilanRow('DM', 'Autres dettes', '(solde créditeur) 185;45;46;471;472;473;474;475;476;477'),
+    BilanRow('DN', 'Provisions pour risques et charges à court terme', '4991;4997;599'),
     BilanRow('DP', 'Total Passif Circulant', 'Somme DH à DN'),
 
     # ---- Trésorerie passif ----
@@ -136,13 +148,12 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('DV', 'Écart conversion passif', '479'),
 
     # ---- Total passif ----
-    BilanRow('DZ', 'Total passif', 'CP+DF+DP+DT+DV'),
+    # DF contient déjà CP → CP retiré de DZ pour éviter le double comptage.
+    BilanRow('DZ', 'Total passif', 'DF+DP+DT+DV'),
 
-    # ---- Codes annexes (régularisation) ----
-    # Hors composition DZ : ce sont des notes annexes
-    BilanRow('RPCP', 'Répartition périodique des charges et produits', '474'),
-    BilanRow('CCA', "Charges constatées d'avance", '476'),
-    BilanRow('PCA', "Produits constatés d'avance", '477'),
+    # NB : les ex-codes annexes RPCP (474), CCA (476), PCA (477) et RPCF (599)
+    # sont supprimés. 474/475/476/477 sont désormais classés par sens de solde
+    # dans BJ (débiteur) / DM (créditeur) ; 599 est repris dans DN.
 ]
 
 
@@ -172,10 +183,6 @@ BILAN_SUBDIVISIONS_REFERENCE: Dict[str, List[str]] = {
 }
 
 # Codes annexes : hors composition DZ mais documentés comme rubriques bilan.
-# Ces codes peuvent être utilisés pour des notes complémentaires aux états.
-BILAN_ANNEXES = {
-    'RPCP': 'Répartition périodique des charges et produits',
-    'CCA': "Charges constatées d'avance",
-    'PCA': "Produits constatés d'avance",
-    'RPCF': 'Risques provisionnés à caractère financier',
-}
+# Vidé après la révision : RPCP/CCA/PCA/RPCF supprimés (comptes reclassés par
+# sens de solde dans BJ/DM, et 599 repris dans DN).
+BILAN_ANNEXES: Dict[str, str] = {}
