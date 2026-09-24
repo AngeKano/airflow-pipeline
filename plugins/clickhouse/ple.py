@@ -29,6 +29,15 @@ class PLEManager(ClickHouseBase):
     def create_table(self, client_id: str):
         db_name = self._get_db_name(client_id)
 
+        # La clé de tri DOIT inclure solde_filter : une même racine porte deux
+        # rubriques distinctes selon le sens du solde (ex: racine 44 → BJ si
+        # débiteur, DK3 si créditeur). Sans solde_filter dans la clé, le
+        # ReplacingMergeTree fusionne ces deux lignes en une seule et casse le
+        # classement par solde. On recrée la table si son ancienne clé l'omet
+        # (ALTER ne peut pas modifier une clé de tri). La table étant
+        # entièrement reconstruite par populate() à chaque run, le DROP est sûr.
+        self._recreate_if_stale_key(db_name)
+
         self._execute(f"""
             CREATE TABLE IF NOT EXISTS {db_name}.ple (
                 racine String,
@@ -39,12 +48,28 @@ class PLEManager(ClickHouseBase):
                 exclusions String DEFAULT '',
                 updated_at DateTime DEFAULT now()
             ) ENGINE = ReplacingMergeTree(updated_at)
-            ORDER BY (type_rubrique, racine, nb_racine)
-            PRIMARY KEY (type_rubrique, racine, nb_racine)
+            ORDER BY (type_rubrique, racine, nb_racine, solde_filter)
+            PRIMARY KEY (type_rubrique, racine, nb_racine, solde_filter)
         """)
         # Auto-migration pour les bases existantes (avant l'ajout de type_rubrique)
         self._migrate_schema(db_name)
         print(f"  ✓ Table {db_name}.ple prête")
+
+    def _recreate_if_stale_key(self, db_name: str):
+        """DROP la table ple si sa clé de tri n'inclut pas solde_filter."""
+        try:
+            result = self._execute(f"""
+                SELECT sorting_key FROM system.tables
+                WHERE database = '{db_name}' AND name = 'ple'
+            """)
+        except Exception:
+            return
+        if not result:
+            return  # table absente → sera créée avec la bonne clé
+        sorting_key = str(result[0][0])
+        if 'solde_filter' not in sorting_key:
+            self._execute(f"DROP TABLE IF EXISTS {db_name}.ple")
+            print(f"    ♻️ Table {db_name}.ple recréée (clé de tri + solde_filter)")
 
     def _migrate_schema(self, db_name: str):
         """Ajoute les colonnes manquantes aux tables ple créées avant l'évolution Bilan."""
