@@ -68,9 +68,30 @@ def enrich_grand_livre(
 
     # Caches (les lookups ClickHouse sont coûteux)
     rubrique_cache: Dict[str, str] = {}
-    bilan_rubrique_cache: Dict[tuple, str] = {}  # (compte, solde_sign) → bilan_rubrique
+    bilan_rubrique_cache: Dict[str, str] = {}  # compte_final → bilan_rubrique
     tiers_cache: Dict[str, Dict[str, str]] = {}
     mapping_cache: Dict[str, Dict[str, object]] = {}
+
+    # Pré-passe : solde NET par compte final (Σdébit − Σcrédit).
+    # Le classement au bilan des comptes à solde variable (comptes de tiers,
+    # classe 4) doit se faire sur le solde NET du compte, PAS ligne par ligne :
+    # sinon les lignes de débit d'un compte au solde créditeur partent à tort
+    # à l'actif (ex: 431100 CNPS, net créditeur, dont les paiements filaient en
+    # BJ au lieu de rester en DK2). Le sens est ainsi constant pour toutes les
+    # lignes d'un même compte.
+    net_solde_by_compte: Dict[str, float] = {}
+    for row in data:
+        _compte = row[2]
+        if apply_mapping:
+            if _compte not in mapping_cache:
+                mapping_cache[_compte] = map_compte(_compte)
+            _compte_final = mapping_cache[_compte]['compte_syscohada']
+        else:
+            _compte_final = _compte
+        net_solde_by_compte[_compte_final] = (
+            net_solde_by_compte.get(_compte_final, 0.0)
+            + float(row[10]) - float(row[11])
+        )
 
     try:
         for row in data:
@@ -101,17 +122,17 @@ def enrich_grand_livre(
             if rubrique:
                 stats['with_rubrique'] += 1
 
-            # --- Rubrique Bilan (lookup avec filtre solde) ---
-            # Le solde signé (debit - credit) détermine si on tombe dans les
-            # filtres "solde débiteur" ou "solde créditeur" du référentiel.
-            solde_signed = float(debit) - float(credit)
-            solde_sign = 1 if solde_signed > 0 else (-1 if solde_signed < 0 else 0)
-            cache_key = (compte_final, solde_sign)
-            if cache_key not in bilan_rubrique_cache:
-                bilan_rubrique_cache[cache_key] = ch_manager.get_bilan_rubrique(
-                    client_id, compte_final, solde_signed,
+            # --- Rubrique Bilan (classement sur le solde NET du compte) ---
+            # Le sens (débiteur/créditeur) retenu est celui du solde NET du
+            # compte entier — identique pour toutes ses lignes. Un compte de
+            # tiers n'est donc jamais éclaté entre actif et passif : toutes ses
+            # écritures (débit ET crédit) tombent dans la même rubrique bilan.
+            compte_solde_net = net_solde_by_compte.get(compte_final, 0.0)
+            if compte_final not in bilan_rubrique_cache:
+                bilan_rubrique_cache[compte_final] = ch_manager.get_bilan_rubrique(
+                    client_id, compte_final, compte_solde_net,
                 )
-            bilan_rubrique = bilan_rubrique_cache[cache_key]
+            bilan_rubrique = bilan_rubrique_cache[compte_final]
             if bilan_rubrique:
                 stats['with_bilan'] = stats.get('with_bilan', 0) + 1
 
