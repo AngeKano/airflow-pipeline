@@ -29,9 +29,9 @@ BILAN_REFERENCE: List[BilanRow] = [
     # ---- Actif immobilisé : Immobilisations incorporelles ----
     BilanRow('AD', 'Immobilisations incorporelles', 'AE+AF+AG+AH'),
     BilanRow('AD1', 'Amortissement des immobilisations incorporelles', 'AE1+AF1+AG1+AH1'),
-    BilanRow('AD2', 'Provisions pour dépréciation des immobilisations incorporelles', 'AE2+AF2+AG2+AH2'),
-    BilanRow('AE', 'Frais développement', '211;2191'),
-    BilanRow('AE1', 'Amortissement des frais de recherche et de développement', '2811'),
+    BilanRow('AD2', 'Provisions pour dépréciation des immobilisations incorporelles', 'AF2+AG2+AH2'),
+    BilanRow('AE', 'Frais développement', '211;2191;2181'),
+    BilanRow('AE1', 'Amortissement des frais de recherche et de développement', '2811;2818'),
     BilanRow('AE2', 'Dépréciation des frais de recherche et de développement', '2911;2918;2919'),
     BilanRow('AF', 'Brevets licences logiciels', '212;213;2193;214'),
     BilanRow('AF1', 'Amortissement des brevets, licences, concessions et droits similaires, logiciels', '2812;2813;2814'),
@@ -39,7 +39,7 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('AG', 'Fonds commercial', '215;216'),
     BilanRow('AG1', 'Amortissement du fonds commercial et droit au bail', '2815;2816'),
     BilanRow('AG2', 'Provisions pour dépréciation fonds commercial et droit au bail', '2915;2916'),
-    BilanRow('AH', 'Autres incorporelles', '217;218;2198'),
+    BilanRow('AH', 'Autres incorporelles', '217;2182;2183;2184;2188;2198'),
     BilanRow('AH1', 'Amortissement des biens incorporels', '2817'),
     BilanRow('AH2', 'Provisions pour dépréciation autres droits et valeurs', '2917'),
 
@@ -52,14 +52,14 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('AJ', 'Terrains', '22'),
     BilanRow('AJ1', 'Amortissement des terrains', '282'),
     BilanRow('AJ2', 'Provisions pour dépréciation des terrains', '292'),
-    BilanRow('AK', 'Bâtiments', '231;232;237;239'),
+    BilanRow('AK', 'Bâtiments', '231;232;233;237;2391'),
     BilanRow('AK1', 'Amortissements des bâtiments', '2831;2832;2833;2837'),
     BilanRow('AK2', 'Provisions pour dépréciation des bâtiments', '2931;2932;2933;2937;2939'),
     BilanRow('AL', 'Installations', '235;234;238;2392;2393;2394;2395;2398'),
     BilanRow('AL1', 'Amortissements des installations techniques et agencements', '2835;2834;2838'),
     BilanRow('AL2', 'Provisions pour dépréciation des installations techniques et agencements', '2934;2935;2938'),
     BilanRow('AM', 'Matériel', '241;242;243;244;246;247;248;2491-2494;2496;2497;2498'),
-    BilanRow('AM1', 'Amortissement du matériel', '284 sauf 2845'),
+    BilanRow('AM1', 'Amortissement du matériel', '2841;2842;2843;2844;2846;2847;2848'),
     BilanRow('AM2', 'Dépréciation des autres matériels', '2941;2942;2943;2944;2946;2947;2948;2949'),
     BilanRow('AN', 'Transport', '245;2495'),
     BilanRow('AN1', 'Amortissement du matériel de transport', '2845'),
@@ -81,6 +81,7 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('BA', 'Actif Circulant HAO', '485;488'),
     BilanRow('BA1', 'Dépréciations Actif Circulant HAO', '498'),
     BilanRow('BB', 'Stocks et Encours', '31-38'),
+    BilanRow('BB1', 'Dépréciations Stocks et Encours', '39'),
     BilanRow('BG', 'Créances et Emplois Assimilés', 'BH+BI+BJ'),
     BilanRow('BH', 'Avances fournisseurs', '409'),
     BilanRow('BH1', 'Dépréciation fournisseurs avances versées', '490'),
@@ -88,6 +89,7 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('BI1', 'Dépréciations clients', '491'),
     # BJ : autres créances = soldes DÉBITEURS des comptes de tiers à solde variable.
     BilanRow('BJ', 'Autres créances', '(solde débiteur) 185;42;43;44;45;46;471;472;473;474;475;476;477'),
+    BilanRow('BJ1', 'Dépréciations autres créances', '492;493;494;495;496;497'),
     BilanRow('BK', 'Total Actif Circulant', 'BA+BB+BG'),
 
     # ---- Trésorerie actif ----
@@ -99,8 +101,8 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('BS', 'Banques, chèques postaux, caisse et assimilés', 'BSA+BSB+BSC'),
     BilanRow('BS2', 'Dépréciation des comptes banques, établissements financiers et assimilés', '592;593;594'),
     BilanRow('BSA', 'Caisse', '57'),
-    BilanRow('BSB', 'Banques', '52'),
-    BilanRow('BSC', 'Autres trésoreries', '53;54'),
+    BilanRow('BSB', 'Banques', '(solde débiteur) 52'),
+    BilanRow('BSC', 'Autres trésoreries', '(solde débiteur) 53;54;55;581;582'),
     BilanRow('BT', 'Total Trésorerie Actif', 'BQ+BR+BS'),
     BilanRow('BU', 'Écart conversion actif', '478'),
     BilanRow('BZ', 'Total actif', 'AZ+BK+BT+BU'),
@@ -143,7 +145,7 @@ BILAN_REFERENCE: List[BilanRow] = [
 
     # ---- Trésorerie passif ----
     BilanRow('DQ', "Banques, crédits d'escompte", '564;565'),
-    BilanRow('DR', 'Banques, établissements financiers et crédits de trésorerie', '561;566'),
+    BilanRow('DR', 'Banques, établissements financiers et crédits de trésorerie', '(solde créditeur) 52;53;561;566'),
     BilanRow('DT', 'Trésorerie passif', 'DQ + DR'),
     BilanRow('DV', 'Écart conversion passif', '479'),
 
