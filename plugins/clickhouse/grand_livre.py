@@ -10,16 +10,14 @@ class GrandLivreManager(ClickHouseBase):
     """Gestion du Grand Livre unifié"""
 
     # Colonnes requises avec leur type et valeur par défaut.
-    # `rubrique` (P&L) et `bilan_rubrique` sont placés côte à côte juste
-    # après intitule_compte pour faciliter la lecture (analyse économique
-    # à gauche, analyse patrimoniale à droite).
+    # `rubrique` est une colonne UNIQUE fusionnant la rubrique P&L (classes
+    # 6/7/8) et la rubrique bilan (classes 1-5), mutuellement exclusives.
     REQUIRED_COLUMNS = {
         'date_gl': ('String', None),
         'entite': ('String', None),
         'compte': ('String', None),
         'intitule_compte': ('String', "''"),
         'rubrique': ('String', "''"),
-        'bilan_rubrique': ('String', "''"),
         'date_transaction': ('String', None),
         'code_journal': ('String', None),
         'numero_piece': ('String', None),
@@ -52,7 +50,6 @@ class GrandLivreManager(ClickHouseBase):
                 compte String,
                 intitule_compte String DEFAULT '',
                 rubrique String DEFAULT '',
-                bilan_rubrique String DEFAULT '',
                 date_transaction String,
                 code_journal String,
                 numero_piece String,
@@ -76,9 +73,20 @@ class GrandLivreManager(ClickHouseBase):
             PRIMARY KEY (batch_id, periode, compte, date_transaction, code_journal, numero_piece, row_id)
         """)
         
+        # Fusion des rubriques : supprimer l'ancienne colonne bilan_rubrique
+        # si elle existe (la rubrique bilan est désormais fusionnée dans
+        # `rubrique`). DROP COLUMN est instantané ici car la colonne n'est pas
+        # dans la clé de tri.
+        try:
+            self._execute(
+                f"ALTER TABLE {db_name}.grand_livre DROP COLUMN IF EXISTS bilan_rubrique"
+            )
+        except Exception as e:
+            print(f"    ⚠️ DROP bilan_rubrique: {e}")
+
         # Migrer le schéma si nécessaire
         self._migrate_schema(db_name)
-        
+
         print(f"  ✓ Table {db_name}.grand_livre prête")
 
     def _migrate_schema(self, db_name: str):
@@ -116,9 +124,9 @@ class GrandLivreManager(ClickHouseBase):
         """
         Insère les transactions du Grand Livre.
 
-        Format data attendu (23 colonnes — rubrique P&L et bilan_rubrique
-        côte à côte juste après intitule_compte) :
-        (date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
+        Format data attendu (22 colonnes — une seule colonne `rubrique`
+        fusionnant P&L et bilan) :
+        (date_gl, entite, compte, intitule_compte, rubrique,
          date_transaction, code_journal, numero_piece, numero_facture,
          libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
          debit, credit, solde, periode, batch_id, row_id,
@@ -128,11 +136,11 @@ class GrandLivreManager(ClickHouseBase):
             print("⚠️ Aucune transaction à insérer")
             return
 
-        # Sanity check : 23 colonnes attendues
-        if len(data[0]) != 23:
+        # Sanity check : 22 colonnes attendues
+        if len(data[0]) != 22:
             raise ValueError(
                 f"upsert_grand_livre: tuples de {len(data[0])} colonnes reçus, "
-                f"attendu 23 (sortie de enrich_grand_livre). "
+                f"attendu 22 (sortie de enrich_grand_livre). "
                 f"Mettre à jour les appelants."
             )
 
@@ -151,7 +159,7 @@ class GrandLivreManager(ClickHouseBase):
 
         query = f"""
             INSERT INTO {db_name}.grand_livre (
-                date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
+                date_gl, entite, compte, intitule_compte, rubrique,
                 date_transaction, code_journal, numero_piece, numero_facture,
                 libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
                 debit, credit, solde, periode, batch_id, row_id,
@@ -195,12 +203,12 @@ class GrandLivreManager(ClickHouseBase):
         }
 
     def get_data(self, client_id: str, batch_id: str) -> List[Tuple]:
-        """Récupère toutes les données du grand livre pour export (23 colonnes)."""
+        """Récupère toutes les données du grand livre pour export (22 colonnes)."""
         db_name = self._get_db_name(client_id)
 
         return self._execute(f"""
             SELECT
-                date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
+                date_gl, entite, compte, intitule_compte, rubrique,
                 date_transaction, code_journal, numero_piece, numero_facture,
                 libelle_ecriture, n_tiers, intitule_tiers, type_tiers,
                 debit, credit, solde, periode, batch_id, row_id,

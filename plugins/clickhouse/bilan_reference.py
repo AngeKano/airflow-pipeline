@@ -44,20 +44,26 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('AH2', 'Provisions pour dépréciation autres droits et valeurs', '2917'),
 
     # ---- Actif immobilisé : Immobilisations corporelles ----
-    # Éclatement des codes fusionnés bâtiments+installations (ex-AKL1/AKL2/AMN)
-    # en codes séparés AK1/AK2 (bâtiments) et AL1/AL2 (installations), + AM2/AN2.
-    BilanRow('AI', 'Immobilisations corporelles', 'AJ+AK+AL+AM+AN+AP'),
-    BilanRow('AI1', 'Amortissement des immobilisations corporelles', 'AJ1+AK1+AL1+AM1+AN1'),
-    BilanRow('AI2', 'Provisions pour dépréciation des immobilisations corporelles', 'AJ2+AK2+AL2+AM2+AN2+AP2'),
+    # Détail bâtiments/installations en AK1/AK2 + AL1/AL2, regroupés dans les
+    # sous-agrégats AKL1 (=AK1+AL1), AKL2 (=AK2+AL2) et AMN (=AM2+AN2) ; ce sont
+    # ces sous-agrégats qui alimentent AI1/AI2. AP (avances) sort de AI : c'est
+    # une ligne à part au niveau du total AZ.
+    BilanRow('AI', 'Immobilisations corporelles', 'AJ+AK+AL+AM+AN'),
+    BilanRow('AI1', 'Amortissement des immobilisations corporelles', 'AJ1+AKL1+AM1+AN1'),
+    BilanRow('AI2', 'Provisions pour dépréciation des immobilisations corporelles', 'AJ2+AKL2+AMN+AP2'),
     BilanRow('AJ', 'Terrains', '22'),
     BilanRow('AJ1', 'Amortissement des terrains', '282'),
     BilanRow('AJ2', 'Provisions pour dépréciation des terrains', '292'),
     BilanRow('AK', 'Bâtiments', '231;232;233;237;2391'),
     BilanRow('AK1', 'Amortissements des bâtiments', '2831;2832;2833;2837'),
-    BilanRow('AK2', 'Provisions pour dépréciation des bâtiments', '2931;2932;2933;2937;2939'),
+    BilanRow('AK2', 'Provisions pour dépréciation des bâtiments', '2931;2932;2933;2937'),
     BilanRow('AL', 'Installations', '235;234;238;2392;2393;2394;2395;2398'),
     BilanRow('AL1', 'Amortissements des installations techniques et agencements', '2835;2834;2838'),
     BilanRow('AL2', 'Provisions pour dépréciation des installations techniques et agencements', '2934;2935;2938'),
+    # Sous-agrégats amortissements/provisions bâtiments+installations et matériel+transport
+    BilanRow('AKL1', 'Amortissements des bâtiments, installations techniques et agencements', 'AK1+AL1'),
+    BilanRow('AKL2', 'Provisions pour dépréciation des bâtiments, installations techniques et agencements', 'AK2+AL2'),
+    BilanRow('AMN', 'Provisions pour dépréciation de matériel et transport', 'AM2+AN2'),
     BilanRow('AM', 'Matériel', '241;242;243;244;246;247;248;2491-2494;2496;2497;2498'),
     BilanRow('AM1', 'Amortissement du matériel', '2841;2842;2843;2844;2846;2847;2848'),
     BilanRow('AM2', 'Dépréciation des autres matériels', '2941;2942;2943;2944;2946;2947;2948;2949'),
@@ -75,7 +81,8 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('AS2', 'Provisions pour dépréciation des autres immobilisations financières', '297'),
 
     # ---- Total actif immobilisé ----
-    BilanRow('AZ', 'Total actif immobilisé', 'AD+AI+AQ'),
+    # AP (avances sur immobilisations) est une ligne propre, à côté de AD/AI/AQ.
+    BilanRow('AZ', 'Total actif immobilisé', 'AD+AI+AP+AQ'),
 
     # ---- Actif circulant ----
     BilanRow('BA', 'Actif Circulant HAO', '485;488'),
@@ -97,12 +104,20 @@ BILAN_REFERENCE: List[BilanRow] = [
     BilanRow('BQ2', 'Dépréciation des titres de placement', '590'),
     BilanRow('BR', 'Valeurs à encaisser', '51'),
     BilanRow('BR2', 'Dépréciation des valeurs à encaisser', '591'),
-    # BS devient une composition pure : BSA + BSB + BSC
-    BilanRow('BS', 'Banques, chèques postaux, caisse et assimilés', 'BSA+BSB+BSC'),
-    BilanRow('BS2', 'Dépréciation des comptes banques, établissements financiers et assimilés', '592;593;594'),
+    # BS : composition détaillée de la trésorerie actif (BSA caisse → BSG accréditifs).
+    # Les dépréciations (BSB1/BSD1/BSE1 = 592/593/594) sont des codes à part
+    # (colonne "dépréciation" de l'état, hors somme BS).
+    BilanRow('BS', 'Banques, chèques postaux, caisse et assimilés', 'BSA+BSB+BSC+BSD+BSE+BSF+BSG'),
     BilanRow('BSA', 'Caisse', '57'),
     BilanRow('BSB', 'Banques', '(solde débiteur) 52'),
-    BilanRow('BSC', 'Autres trésoreries', '(solde débiteur) 53;54;55;581;582'),
+    BilanRow('BSB1', 'Dépréciation des comptes banques', '592'),
+    BilanRow('BSC', "Régies d'avances", '581'),
+    BilanRow('BSD', 'Etablissements financiers et assimilés', '(solde débiteur) 53'),
+    BilanRow('BSD1', 'Dépréciation des comptes établissements financiers et assimilés', '593'),
+    BilanRow('BSE', 'Instruments de trésorerie', '54'),
+    BilanRow('BSE1', "Dépréciation des comptes d'instruments de trésorerie", '594'),
+    BilanRow('BSF', 'Instruments de monnaie électronique', '55'),
+    BilanRow('BSG', 'Accréditifs', '582'),
     BilanRow('BT', 'Total Trésorerie Actif', 'BQ+BR+BS'),
     BilanRow('BU', 'Écart conversion actif', '478'),
     BilanRow('BZ', 'Total actif', 'AZ+BK+BT+BU'),
@@ -145,7 +160,12 @@ BILAN_REFERENCE: List[BilanRow] = [
 
     # ---- Trésorerie passif ----
     BilanRow('DQ', "Banques, crédits d'escompte", '564;565'),
-    BilanRow('DR', 'Banques, établissements financiers et crédits de trésorerie', '(solde créditeur) 52;53;561;566'),
+    # DR : sous-agrégat = DRA (banques créditrices) + DRB (établissements
+    # financiers créditeurs) + DRC (crédits de trésorerie).
+    BilanRow('DR', 'Banques, établissements financiers et crédits de trésorerie', 'DRA+DRB+DRC'),
+    BilanRow('DRA', 'Banques créditeurs', '(solde créditeur) 52'),
+    BilanRow('DRB', 'Etablissements financiers créditeurs', '(solde créditeur) 53'),
+    BilanRow('DRC', 'Crédits de trésorerie', '561;566'),
     BilanRow('DT', 'Trésorerie passif', 'DQ + DR'),
     BilanRow('DV', 'Écart conversion passif', '479'),
 
@@ -173,15 +193,19 @@ COMPOSITE_ONLY_CODES = {
     'BG', 'BK', 'BT', 'BZ',
     'CP',
     'DD', 'DF', 'DP', 'DT', 'DZ',
-    # Subdivisions parent (DK, BS) qui n'ont QUE des sous-rubriques
-    'DK', 'BS',
+    # Subdivisions parent (DK, BS, DR) qui n'ont QUE des sous-rubriques
+    'DK', 'BS', 'DR',
+    # Sous-agrégats amortissements/provisions corporelles
+    'AKL1', 'AKL2', 'AMN',
 }
 
 # Subdivisions explicites (un parent → sous-rubriques de plein droit).
-# Permet au front d'afficher les sous-totaux DK1/2/3 sous DK ou BSA/B/C sous BS.
+# Permet au front d'afficher les sous-totaux DK1/2/3 sous DK, BSA→BSG sous BS,
+# ou DRA/DRB/DRC sous DR.
 BILAN_SUBDIVISIONS_REFERENCE: Dict[str, List[str]] = {
     'DK': ['DK1', 'DK2', 'DK3'],
-    'BS': ['BSA', 'BSB', 'BSC'],
+    'BS': ['BSA', 'BSB', 'BSC', 'BSD', 'BSE', 'BSF', 'BSG'],
+    'DR': ['DRA', 'DRB', 'DRC'],
 }
 
 # Codes annexes : hors composition DZ mais documentés comme rubriques bilan.

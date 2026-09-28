@@ -34,9 +34,10 @@ def enrich_grand_livre(
          numero_piece, numero_facture, libelle, n_tiers, debit, credit, solde,
          periode, batch_id, row_id)
 
-    Format de sortie (23 colonnes — aligné sur la table ClickHouse grand_livre,
-    rubrique P&L et bilan_rubrique côte à côte après intitule_compte) :
-        (date_gl, entite, compte, intitule_compte, rubrique, bilan_rubrique,
+    Format de sortie (22 colonnes — aligné sur la table ClickHouse grand_livre).
+    Une SEULE colonne `rubrique` : fusion de la rubrique P&L (classes 6/7/8) et
+    de la rubrique bilan (classes 1-5), mutuellement exclusives par compte.
+        (date_gl, entite, compte, intitule_compte, rubrique,
          date_trans, code_journal, numero_piece, numero_facture, libelle,
          n_tiers, intitule_tiers, type_tiers, debit, credit, solde,
          periode, batch_id, row_id,
@@ -151,13 +152,17 @@ def enrich_grand_livre(
                 if intitule_tiers or type_tiers:
                     stats['with_tiers_info'] += 1
 
+            # Fusion en une seule colonne rubrique. Un compte est soit P&L
+            # (classes 6/7/8 → rubrique) soit bilan (classes 1-5 → bilan_rubrique),
+            # jamais les deux → on prend celle qui est renseignée.
+            rubrique_finale = rubrique or bilan_rubrique
+
             enriched.append((
                 date_gl,
                 entite,
                 compte_final,
                 intitule_compte,
-                rubrique,
-                bilan_rubrique,
+                rubrique_finale,
                 date_trans,
                 code_journal,
                 numero_piece,

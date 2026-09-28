@@ -46,11 +46,11 @@ def export_grand_livre_excel(
         
         print(f"  → {len(data)} transactions à exporter")
         
-        # Créer le DataFrame (23 colonnes — Rubrique P&L et Rubrique Bilan
-        # côte à côte juste après Intitulé Compte).
+        # Créer le DataFrame (22 colonnes — une seule colonne Rubrique
+        # fusionnant P&L et bilan).
         columns = [
             'Date GL', 'Entité', 'Compte', 'Intitulé Compte',
-            'Rubrique', 'Rubrique Bilan',
+            'Rubrique',
             'Date Transaction', 'Code Journal', 'N° Pièce', 'N° Facture',
             'Libellé', 'N° Tiers', 'Intitulé Tiers', 'Type Tiers',
             'Débit', 'Crédit', 'Solde', 'Période', 'Batch ID', 'Row ID',
@@ -75,25 +75,24 @@ def export_grand_livre_excel(
                 'B': 15,  # Entité
                 'C': 10,  # Compte
                 'D': 30,  # Intitulé Compte
-                'E': 10,  # Rubrique (P&L)
-                'F': 14,  # Rubrique Bilan
-                'G': 12,  # Date Transaction
-                'H': 8,   # Code Journal
-                'I': 10,  # N° Pièce
-                'J': 15,  # N° Facture
-                'K': 40,  # Libellé
-                'L': 20,  # N° Tiers
-                'M': 30,  # Intitulé Tiers
-                'N': 12,  # Type Tiers
-                'O': 15,  # Débit
-                'P': 15,  # Crédit
-                'Q': 15,  # Solde
-                'R': 8,   # Période
-                'S': 36,  # Batch ID
-                'T': 8,   # Row ID
-                'U': 15,  # Compte PCG Origine
-                'V': 5,   # HAO
-                'W': 18,  # Mapping Status
+                'E': 12,  # Rubrique (P&L + bilan fusionnées)
+                'F': 12,  # Date Transaction
+                'G': 8,   # Code Journal
+                'H': 10,  # N° Pièce
+                'I': 15,  # N° Facture
+                'J': 40,  # Libellé
+                'K': 20,  # N° Tiers
+                'L': 30,  # Intitulé Tiers
+                'M': 12,  # Type Tiers
+                'N': 15,  # Débit
+                'O': 15,  # Crédit
+                'P': 15,  # Solde
+                'Q': 8,   # Période
+                'R': 36,  # Batch ID
+                'S': 8,   # Row ID
+                'T': 15,  # Compte PCG Origine
+                'U': 5,   # HAO
+                'V': 18,  # Mapping Status
             }
 
             for col, width in column_widths.items():
