@@ -70,6 +70,7 @@ def enrich_grand_livre(
     # Caches (les lookups ClickHouse sont coûteux)
     rubrique_cache: Dict[str, str] = {}
     bilan_rubrique_cache: Dict[str, str] = {}  # compte_final → bilan_rubrique
+    intitule_cache: Dict[str, str] = {}  # compte_final → intitulé (dim plan_compte)
     tiers_cache: Dict[str, Dict[str, str]] = {}
     mapping_cache: Dict[str, Dict[str, object]] = {}
 
@@ -115,6 +116,17 @@ def enrich_grand_livre(
                 compte_final = compte
                 is_hao = 0
                 mapping_status = 'none'
+
+            # --- Intitulé du compte (lookup dimension plan_compte si absent) ---
+            # Les exports .pnm ne portent pas l'intitulé des comptes → on le
+            # récupère depuis la table plan_compte (chargée avant le grand livre),
+            # sur le compte final SYSCOHADA.
+            if not intitule_compte:
+                if compte_final not in intitule_cache:
+                    intitule_cache[compte_final] = ch_manager.get_intitule_compte(
+                        client_id, compte_final,
+                    )
+                intitule_compte = intitule_cache[compte_final]
 
             # --- Rubrique P&L (lookup PLE basé sur le compte final SYSCOHADA) ---
             if compte_final not in rubrique_cache:
