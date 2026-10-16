@@ -287,3 +287,56 @@ def get_batch_info(batch_id: str) -> Optional[Dict]:
     finally:
         if conn:
             conn.close()
+
+
+def update_dimension_update(
+    update_id: str,
+    status: str,
+    progress: int = 0,
+    rows_inserted: Optional[int] = None,
+    rows_updated: Optional[int] = None,
+    error_message: Optional[str] = None,
+):
+    """
+    Met à jour le suivi d'une mise à jour unitaire de dimension
+    (table `dimension_updates`, créée par le front au dépôt du fichier).
+
+    Équivalent de update_etl_status pour le DAG etl_dimensions_clickhouse :
+    le front ne fait que lire cette table. Compteurs et message d'erreur ne
+    sont écrits que s'ils sont fournis ; `processedAt` est posé dès que le
+    traitement est terminé (COMPLETED ou FAILED).
+    """
+    conn = None
+    try:
+        conn = get_postgres_connection()
+        cur = conn.cursor()
+
+        sets = ['status = %s', 'progress = %s']
+        values = [status, progress]
+        if rows_inserted is not None:
+            sets.append('"rowsInserted" = %s')
+            values.append(rows_inserted)
+        if rows_updated is not None:
+            sets.append('"rowsUpdated" = %s')
+            values.append(rows_updated)
+        if error_message is not None:
+            sets.append('"errorMessage" = %s')
+            values.append(error_message[:2000])
+        if status in ('COMPLETED', 'FAILED'):
+            sets.append('"processedAt" = NOW()')
+
+        values.append(update_id)
+        cur.execute(
+            f'UPDATE dimension_updates SET {", ".join(sets)} WHERE id = %s',
+            tuple(values),
+        )
+        conn.commit()
+        print(f"  📊 dimension_updates {update_id}: {status} ({progress}%)")
+
+    except Exception as e:
+        print(f"  ⚠️ Erreur mise à jour dimension_updates: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()

@@ -14,13 +14,18 @@ Déclenchement (API Airflow) : POST /api/v1/dags/etl_dimensions_clickhouse/dagRu
         "client_id": "<id client>",                       # obligatoire
         "dimension": "plan_comptes" | "code_journal" | "plan_tiers",  # obligatoire
         "s3_key":    "<clé S3 complète du fichier>",       # obligatoire
-        "batch_id":  "<id de suivi>"                       # optionnel
+        "batch_id":  "<id de suivi>",                      # optionnel
+        "update_id": "<id dimension_updates>"              # optionnel (front)
     }}
 
 Si batch_id est fourni, le statut (comptable_files.processingStatus) et le
 message d'erreur (comptable_files.errorMessage) des fichiers de ce batch sont
 mis à jour, comme pour le DAG complet. Le résultat (lignes ajoutées /
 modifiées / inchangées) est renvoyé en XCom (return_value de update_dimension).
+
+Si update_id est fourni (dépôt depuis l'onglet Import du front), la ligne
+dimension_updates correspondante reçoit statut, progression, compteurs et
+message d'erreur : le front ne fait que la lire.
 """
 from datetime import datetime
 
@@ -28,7 +33,11 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 from etl.config import DEFAULT_ARGS, ETLStatus
-from etl.postgres import update_etl_status, update_files_error_message
+from etl.postgres import (
+    update_etl_status,
+    update_files_error_message,
+    update_dimension_update,
+)
 from etl.s3 import download_s3_object, cleanup_local_files
 from etl.format_detect import detect_format, validate_format
 from etl.processors import load_dimension, normalize_dimension
@@ -49,6 +58,7 @@ def task_update_dimension(**context):
     client_id = conf.get('client_id')
     s3_key = conf.get('s3_key')
     batch_id = conf.get('batch_id')
+    update_id = conf.get('update_id')
     run_id = context['run_id'].replace(':', '_').replace('+', '_')
     local_dir = f"/tmp/etl_dim_{client_id}_{run_id}"
 
@@ -62,6 +72,8 @@ def task_update_dimension(**context):
 
         if batch_id:
             update_etl_status(batch_id, ETLStatus.VALIDATING, 10)
+        if update_id:
+            update_dimension_update(update_id, ETLStatus.VALIDATING, 10)
 
         file_path = download_s3_object(s3_key, local_dir)
         file_format = detect_format(file_path)
@@ -70,6 +82,8 @@ def task_update_dimension(**context):
 
         if batch_id:
             update_etl_status(batch_id, ETLStatus.PROCESSING, 40)
+        if update_id:
+            update_dimension_update(update_id, ETLStatus.PROCESSING, 40)
 
         with ClickHouseManager() as ch:
             # Base + tables de dimension uniquement (ple / grand_livre non touchés)
@@ -78,6 +92,14 @@ def task_update_dimension(**context):
 
         if batch_id:
             update_etl_status(batch_id, ETLStatus.COMPLETED, 100)
+        if update_id:
+            update_dimension_update(
+                update_id,
+                ETLStatus.COMPLETED,
+                100,
+                rows_inserted=result.get('ajoutees', 0),
+                rows_updated=result.get('modifiees', 0),
+            )
 
         print("=" * 60)
         print(f"🎉 Dimension '{dimension}' mise à jour : "
@@ -93,6 +115,13 @@ def task_update_dimension(**context):
             except Exception as e:
                 print(f"  ⚠️ Impossible d'écrire errorMessage: {e}")
             update_etl_status(batch_id, ETLStatus.FAILED, 100)
+        if update_id:
+            update_dimension_update(
+                update_id,
+                ETLStatus.FAILED,
+                100,
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
         raise
     finally:
         cleanup_local_files(local_dir)
