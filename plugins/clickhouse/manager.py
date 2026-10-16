@@ -33,9 +33,19 @@ class ClickHouseManager:
         self.grand_livre.create_table(client_id)
         self.ple.create_and_populate(client_id)
 
+    def ensure_dimension_tables(self, client_id: str):
+        """Crée la base et les tables de dimension si besoin, sans toucher à
+        ple ni grand_livre (utilisé par la mise à jour unitaire des dimensions)."""
+        db_name = self._get_db_name(client_id)
+        self.client.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
+        self.dimensions.create_tables(client_id)
+
     # Méthodes déléguées - Dimensions
-    def upsert_dimension(self, client_id: str, table_name: str, data: List[Tuple]):
-        return self.dimensions.upsert(client_id, table_name, data)
+    def upsert_dimension(self, client_id: str, table_name: str, data: List[Tuple]) -> dict:
+        return self.dimensions.merge(client_id, table_name, data)
+
+    def propagate_dimension(self, client_id: str, table_name: str, rows: List[Tuple]) -> int:
+        return self.dimensions.propagate_to_grand_livre(client_id, table_name, rows)
 
     def get_dimension_count(self, client_id: str, table_name: str) -> int:
         return self.dimensions.get_count(client_id, table_name)

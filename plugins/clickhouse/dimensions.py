@@ -52,34 +52,141 @@ class DimensionManager(ClickHouseBase):
         """)
         print(f"  ✓ Table {db_name}.plan_tiers prête")
 
-    def upsert(self, client_id: str, table_name: str, data: List[Tuple]):
-        """Insère ou met à jour les données de dimension."""
-        if not data:
-            print(f"⚠️ Aucune donnée à insérer dans {table_name}")
-            return
-
-        db_name = self._get_db_name(client_id)
-
+    @staticmethod
+    def _column_names(table_name: str) -> List[str]:
         config = DIMENSION_CONFIG.get(table_name)
         if not config:
             raise ValueError(f"Table inconnue: {table_name}")
+        return [c.strip() for c in config['columns'].strip('()').split(',')]
 
-        columns = config['columns']
-        pk_column = config['pk_column']
-        pk_index = config['pk_index']
+    @staticmethod
+    def _normalize(row) -> Tuple:
+        return tuple('' if v is None else str(v).strip() for v in row)
 
-        keys = [row[pk_index] for row in data]
+    def merge(self, client_id: str, table_name: str, data: List[Tuple]) -> dict:
+        """
+        Fusion NON destructive d'un fichier dans une table de dimension.
 
-        self._execute(f"""
-            ALTER TABLE {db_name}.{table_name}
-            DELETE WHERE {pk_column} IN %(keys)s
-        """, {'keys': keys})
+        - clé absente de la table      → ligne ajoutée
+        - clé présente, valeurs différentes → ligne mise à jour
+        - clé présente, valeurs identiques  → rien
+        - ligne de la table absente du fichier → CONSERVÉE (jamais de suppression)
 
-        query = f"INSERT INTO {db_name}.{table_name} {columns} VALUES"
-        self._execute(query, data)
+        La mise à jour repose sur le ReplacingMergeTree(updated_at) : la nouvelle
+        version (updated_at plus récent) remplace l'ancienne au merge, forcé par
+        OPTIMIZE FINAL. Seules les lignes nouvelles/modifiées sont réécrites.
 
-        self._execute(f"OPTIMIZE TABLE {db_name}.{table_name} FINAL")
-        print(f"  → {len(data)} lignes upsert dans {db_name}.{table_name}")
+        Returns:
+            {lignes_fichier, ajoutees, modifiees, inchangees, ignorees,
+             rows_ecrites: [tuples ajoutés ou modifiés]}
+        """
+        columns = self._column_names(table_name)
+        pk_index = DIMENSION_CONFIG[table_name]['pk_index']
+        db_name = self._get_db_name(client_id)
+
+        stats = {
+            'lignes_fichier': len(data),
+            'ajoutees': 0,
+            'modifiees': 0,
+            'inchangees': 0,
+            'ignorees': 0,
+            'rows_ecrites': [],
+        }
+
+        # Dédoublonnage du fichier par clé (la dernière occurrence l'emporte).
+        incoming: dict = {}
+        for row in data:
+            row = self._normalize(row)
+            if len(row) != len(columns):
+                raise ValueError(
+                    f"{table_name}: ligne à {len(row)} colonnes, attendu {len(columns)} {columns}"
+                )
+            if not row[pk_index]:
+                stats['ignorees'] += 1
+                continue
+            incoming[row[pk_index]] = row
+
+        if not incoming:
+            print(f"⚠️ Aucune donnée à intégrer dans {table_name}")
+            return stats
+
+        cols_sql = ', '.join(columns)
+        existing = {}
+        for r in self._execute(f"SELECT {cols_sql} FROM {db_name}.{table_name} FINAL"):
+            r = self._normalize(r)
+            existing[r[pk_index]] = r
+
+        to_write = []
+        for key, row in incoming.items():
+            old = existing.get(key)
+            if old is None:
+                stats['ajoutees'] += 1
+                to_write.append(row)
+            elif old != row:
+                stats['modifiees'] += 1
+                to_write.append(row)
+            else:
+                stats['inchangees'] += 1
+
+        if to_write:
+            self._execute(f"INSERT INTO {db_name}.{table_name} ({cols_sql}) VALUES", to_write)
+            self._execute(f"OPTIMIZE TABLE {db_name}.{table_name} FINAL")
+
+        stats['rows_ecrites'] = to_write
+        print(
+            f"  → {db_name}.{table_name} : {stats['ajoutees']} ajoutées, "
+            f"{stats['modifiees']} modifiées, {stats['inchangees']} inchangées "
+            f"(aucune suppression)"
+        )
+        return stats
+
+    def upsert(self, client_id: str, table_name: str, data: List[Tuple]) -> dict:
+        """Alias historique : la mise à jour des dimensions est une fusion non destructive."""
+        return self.merge(client_id, table_name, data)
+
+    # Colonnes dénormalisées dans grand_livre à rafraîchir quand une dimension
+    # change : table → (colonne clé grand_livre, {colonne grand_livre: index dans le tuple}).
+    _GL_PROPAGATION = {
+        'plan_compte': ('compte', {'intitule_compte': 1}),
+        'plan_tiers': ('n_tiers', {'type_tiers': 1, 'intitule_tiers': 2}),
+    }
+
+    def propagate_to_grand_livre(self, client_id: str, table_name: str,
+                                 rows: List[Tuple], chunk_size: int = 500) -> int:
+        """
+        Répercute les intitulés/types modifiés sur les écritures déjà chargées
+        dans grand_livre (qui les stocke en dur). Ne touche QUE ces colonnes,
+        ne supprime aucune ligne, et n'écrase jamais une valeur par du vide.
+
+        Returns: nombre de clés répercutées.
+        """
+        spec = self._GL_PROPAGATION.get(table_name)
+        db_name = self._get_db_name(client_id)
+        if not spec or not rows or not self._table_exists(db_name, 'grand_livre'):
+            return 0
+
+        gl_key, targets = spec
+        propagated = set()
+        for gl_col, idx in targets.items():
+            pairs = [(r[0], r[idx]) for r in rows if r[0] and r[idx]]
+            for i in range(0, len(pairs), chunk_size):
+                chunk = pairs[i:i + chunk_size]
+                keys = [k for k, _ in chunk]
+                values = [v for _, v in chunk]
+                self._execute(
+                    f"""
+                    ALTER TABLE {db_name}.grand_livre
+                    UPDATE {gl_col} = transform({gl_key}, %(keys)s, %(values)s, {gl_col})
+                    WHERE {gl_key} IN %(keys_in)s
+                    """,
+                    {'keys': keys, 'values': values, 'keys_in': tuple(keys)},
+                    settings={'mutations_sync': 1},
+                )
+                propagated.update(keys)
+
+        if propagated:
+            print(f"  ↻ grand_livre : {len(propagated)} clé(s) {table_name} répercutée(s)")
+        return len(propagated)
 
     def get_count(self, client_id: str, table_name: str) -> int:
         db_name = self._get_db_name(client_id)

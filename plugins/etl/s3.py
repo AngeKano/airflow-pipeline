@@ -86,6 +86,24 @@ def download_files_from_s3(client_id: str, batch_id: str, s3_prefix: str) -> Dic
         raise
 
 
+def download_s3_object(s3_key: str, local_dir: str) -> str:
+    """
+    Télécharge un objet S3 précis (clé complète) et renvoie son chemin local.
+    Le nom de fichier d'origine est conservé (l'extension sert à détecter le format).
+    """
+    if not s3_key or s3_key.endswith('/'):
+        raise ValueError(f"Clé S3 invalide: '{s3_key}'")
+
+    os.makedirs(local_dir, exist_ok=True)
+    local_path = os.path.join(local_dir, os.path.basename(s3_key))
+
+    print(f"📥 Téléchargement S3: {s3_key}")
+    s3 = get_s3_client()
+    s3.download_file(S3_CONFIG['bucket_name'], s3_key, local_path)
+    print(f"  ✓ {local_path}")
+    return local_path
+
+
 def validate_files(downloaded_files: Dict[str, str], required_types: List[str] = None) -> bool:
     """
     Valide que tous les fichiers requis sont présents.

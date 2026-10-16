@@ -20,10 +20,17 @@ class ClickHouseBase:
         clean_id = client_id.replace('-', '_').lower()
         return f"repfi_{clean_id}"
 
-    def _execute(self, query: str, params: dict = None):
+    def _execute(self, query: str, params: dict = None, settings: dict = None):
         if params:
-            return self.client.execute(query, params)
-        return self.client.execute(query)
+            return self.client.execute(query, params, settings=settings)
+        return self.client.execute(query, settings=settings)
+
+    def _table_exists(self, db_name: str, table: str) -> bool:
+        result = self._execute(
+            "SELECT count() FROM system.tables WHERE database = %(db)s AND name = %(t)s",
+            {'db': db_name, 't': table},
+        )
+        return bool(result and result[0][0])
 
     def close(self):
         if self._owns_client:

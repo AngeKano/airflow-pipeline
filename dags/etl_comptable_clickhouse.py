@@ -16,17 +16,10 @@ from etl.postgres import (
     update_period_plan_source,
 )
 from etl.s3 import download_files_from_s3, validate_files, cleanup_local_files
-from etl.parsers import (
-    parse_plan_compte,
-    parse_code_journal,
-    parse_plan_tiers,
-    parse_grand_livre,
-    parse_sage_pnm,
-    parse_sage_pnc,
-)
-from etl.processors import enrich_grand_livre, export_grand_livre_excel
+from etl.parsers import parse_grand_livre, parse_sage_pnm
+from etl.processors import enrich_grand_livre, export_grand_livre_excel, load_dimension
 from etl.format_detect import detect_format, validate_format
-from etl.mapping import detect_plan_source, map_compte
+from etl.mapping import detect_plan_source
 from clickhouse.manager import ClickHouseManager
 
 
@@ -116,42 +109,17 @@ def task_process_plan_compte(**context):
         print("⚠️ Fichier Plan Comptable non trouvé")
         return
 
-    result = parse_plan_compte(file_path, client_id)
-
-    # Détection du plan source à partir des comptes du plan comptable.
-    # data = [(compte, intitule, nature), ...] → col[0] = compte
-    comptes = [row[0] for row in result['data']]
-    plan_source = detect_plan_source(comptes)
-    print(f"  📋 Plan source détecté (plan_compte): {plan_source}")
-
-    # Si le plan source est PCG, on mappe les comptes en SYSCOHADA avant
-    # insertion. Ainsi la table plan_compte ClickHouse reste toujours en
-    # référentiel SYSCOHADA, et les lookups d'intitulés depuis le grand livre
-    # (déjà mappé) fonctionnent correctement.
-    final_data = result['data']
-    if plan_source == 'PCG':
-        mapped_data = []
-        nb_mapped = 0
-        nb_unmapped = 0
-        for compte, intitule, nature in final_data:
-            m = map_compte(compte)
-            mapped_data.append((m['compte_syscohada'], intitule, nature))
-            if m['mapping_status'] == 'unmapped':
-                nb_unmapped += 1
-            else:
-                nb_mapped += 1
-        final_data = mapped_data
-        print(f"  🔁 Plan_compte mappé PCG→SYSCO: {nb_mapped} mappés, {nb_unmapped} non mappés (conservés)")
-
+    # Parse + mapping PCG→SYSCO si besoin + fusion non destructive.
+    # Le résultat contient 'plan_source', relu par process_grand_livre.
     with ClickHouseManager() as ch:
-        ch.upsert_dimension(client_id, 'plan_compte', final_data)
+        result = load_dimension(
+            client_id, 'plan_comptes', file_path,
+            data['file_formats'].get('plan_comptes'), ch,
+            require_rows=False,
+        )
 
     update_etl_status(batch_id, ETLStatus.VALIDATING, 40)
-
-    return {
-        **result['stats'],
-        'plan_source': plan_source,
-    }
+    return result
 
 
 def task_process_code_journal(**context):
@@ -166,15 +134,16 @@ def task_process_code_journal(**context):
     if not file_path:
         print("⚠️ Fichier Codes Journaux non trouvé")
         return
-    
-    result = parse_code_journal(file_path, client_id)
-    
+
     with ClickHouseManager() as ch:
-        ch.upsert_dimension(client_id, 'code_journal', result['data'])
-    
+        result = load_dimension(
+            client_id, 'code_journal', file_path,
+            data['file_formats'].get('code_journal'), ch,
+            require_rows=False,
+        )
+
     update_etl_status(batch_id, ETLStatus.VALIDATING, 50)
-    
-    return result['stats']
+    return result
 
 
 def task_process_plan_tiers(**context):
@@ -185,24 +154,21 @@ def task_process_plan_tiers(**context):
     client_id = data['client_id']
     batch_id = data['batch_id']
     file_path = data['files'].get('plan_tiers')
-    file_format = data['file_formats'].get('plan_tiers')
 
     if not file_path:
         print("⚠️ Fichier Plan Tiers non trouvé")
         return
 
-    # Dispatch selon format
-    if file_format == 'sage_pnc':
-        result = parse_sage_pnc(file_path, client_id)
-    else:
-        result = parse_plan_tiers(file_path, client_id)
-
+    # Excel ou .pnc Sage : le dispatch est fait dans load_dimension
     with ClickHouseManager() as ch:
-        ch.upsert_dimension(client_id, 'plan_tiers', result['data'])
+        result = load_dimension(
+            client_id, 'plan_tiers', file_path,
+            data['file_formats'].get('plan_tiers'), ch,
+            require_rows=False,
+        )
 
     update_etl_status(batch_id, ETLStatus.VALIDATING, 60)
-
-    return result['stats']
+    return result
 
 
 def task_process_grand_livre(**context):
