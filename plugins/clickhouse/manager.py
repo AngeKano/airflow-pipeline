@@ -31,14 +31,17 @@ class ClickHouseManager:
 
         self.dimensions.create_tables(client_id)
         self.grand_livre.create_table(client_id)
-        self.ple.create_and_populate(client_id)
+        # ple est un référentiel du client : jamais reconstruit, mapping par
+        # défaut chargé uniquement si la table est vide (nouveau client).
+        self.ple.ensure_table(client_id)
 
     def ensure_dimension_tables(self, client_id: str):
-        """Crée la base et les tables de dimension si besoin, sans toucher à
-        ple ni grand_livre (utilisé par la mise à jour unitaire des dimensions)."""
+        """Crée la base et les référentiels (dimensions + ple) si besoin, sans
+        toucher à grand_livre (utilisé par la mise à jour unitaire)."""
         db_name = self._get_db_name(client_id)
         self.client.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
         self.dimensions.create_tables(client_id)
+        self.ple.ensure_table(client_id)
 
     # Méthodes déléguées - Dimensions
     def upsert_dimension(self, client_id: str, table_name: str, data: List[Tuple]) -> dict:
@@ -60,11 +63,13 @@ class ClickHouseManager:
         return self.dimensions.get_type_tiers(client_id, compte_tiers)
 
     # Méthodes déléguées - PLE
-    def get_rubrique(self, client_id: str, compte: str) -> str:
-        return self.ple.get_rubrique(client_id, compte)
+    def load_ple_index(self, client_id: str):
+        """Mapping ple du client en mémoire (PleIndex.classify pour classer un compte)."""
+        return self.ple.load_index(client_id)
 
-    def get_bilan_rubrique(self, client_id: str, compte: str, solde_signed: float = 0.0) -> str:
-        return self.ple.get_bilan_rubrique(client_id, compte, solde_signed)
+    def reclassify_grand_livre(self, client_id: str) -> dict:
+        """Réapplique le mapping ple actuel à tout le grand livre (colonne rubrique seule)."""
+        return self.grand_livre.reclassify(client_id, self.ple.load_index(client_id))
 
     # Méthodes déléguées - Grand Livre
     def upsert_grand_livre(self, client_id: str, data: List[Tuple], periode: str, batch_id: str):

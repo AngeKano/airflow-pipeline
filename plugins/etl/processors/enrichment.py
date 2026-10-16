@@ -17,6 +17,7 @@ colonnes de traçabilité prennent leurs défauts ('', 0, 'none').
 from typing import Dict, List, Tuple
 
 from clickhouse.manager import ClickHouseManager
+from clickhouse.ple import solde_signe
 from etl.mapping import map_compte
 
 
@@ -67,9 +68,12 @@ def enrich_grand_livre(
         'unmapped': 0,
     }
 
+    # Mapping ple chargé une seule fois ; même fonction de classement que le
+    # reclassement du grand livre (PleIndex.classify).
+    ple_index = ch_manager.load_ple_index(client_id)
+
     # Caches (les lookups ClickHouse sont coûteux)
-    rubrique_cache: Dict[str, str] = {}
-    bilan_rubrique_cache: Dict[str, str] = {}  # compte_final → bilan_rubrique
+    rubrique_cache: Dict[str, str] = {}  # compte_final → rubrique (P&L ou bilan)
     intitule_cache: Dict[str, str] = {}  # compte_final → intitulé (dim plan_compte)
     tiers_cache: Dict[str, Dict[str, str]] = {}
     mapping_cache: Dict[str, Dict[str, object]] = {}
@@ -128,26 +132,18 @@ def enrich_grand_livre(
                     )
                 intitule_compte = intitule_cache[compte_final]
 
-            # --- Rubrique P&L (lookup PLE basé sur le compte final SYSCOHADA) ---
+            # --- Rubrique (P&L pour les classes 6/7/8, bilan pour 1 à 5) ---
+            # Le sens (débiteur/créditeur) retenu au bilan est celui du solde
+            # NET du compte sur le lot — identique pour toutes ses lignes. Un
+            # compte de tiers n'est donc jamais éclaté entre actif et passif.
             if compte_final not in rubrique_cache:
-                rubrique_cache[compte_final] = ch_manager.get_rubrique(client_id, compte_final)
-            rubrique = rubrique_cache[compte_final]
-            if rubrique:
-                stats['with_rubrique'] += 1
-
-            # --- Rubrique Bilan (classement sur le solde NET du compte) ---
-            # Le sens (débiteur/créditeur) retenu est celui du solde NET du
-            # compte entier — identique pour toutes ses lignes. Un compte de
-            # tiers n'est donc jamais éclaté entre actif et passif : toutes ses
-            # écritures (débit ET crédit) tombent dans la même rubrique bilan.
-            compte_solde_net = net_solde_by_compte.get(compte_final, 0.0)
-            if compte_final not in bilan_rubrique_cache:
-                bilan_rubrique_cache[compte_final] = ch_manager.get_bilan_rubrique(
-                    client_id, compte_final, compte_solde_net,
+                rubrique_cache[compte_final] = ple_index.classify(
+                    compte_final, solde_signe(net_solde_by_compte.get(compte_final, 0.0)),
                 )
-            bilan_rubrique = bilan_rubrique_cache[compte_final]
-            if bilan_rubrique:
-                stats['with_bilan'] = stats.get('with_bilan', 0) + 1
+            rubrique_finale = rubrique_cache[compte_final]
+            if rubrique_finale:
+                key = 'with_rubrique' if compte_final.startswith(('6', '7', '8')) else 'with_bilan'
+                stats[key] = stats.get(key, 0) + 1
 
             # --- Tiers (intitulé + type) ---
             intitule_tiers = ""
@@ -163,11 +159,6 @@ def enrich_grand_livre(
                 type_tiers = tiers_info['type']
                 if intitule_tiers or type_tiers:
                     stats['with_tiers_info'] += 1
-
-            # Fusion en une seule colonne rubrique. Un compte est soit P&L
-            # (classes 6/7/8 → rubrique) soit bilan (classes 1-5 → bilan_rubrique),
-            # jamais les deux → on prend celle qui est renseignée.
-            rubrique_finale = rubrique or bilan_rubrique
 
             enriched.append((
                 date_gl,

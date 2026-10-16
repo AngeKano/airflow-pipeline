@@ -4,6 +4,7 @@ Version simplifiée - Plus de fusion, lecture directe du fichier unique
 """
 from typing import List, Tuple, Optional
 from clickhouse.base import ClickHouseBase
+from clickhouse.ple import solde_signe
 
 
 class GrandLivreManager(ClickHouseBase):
@@ -245,6 +246,64 @@ class GrandLivreManager(ClickHouseBase):
             }
             for row in result
         ]
+
+    def reclassify(self, client_id: str, ple_index, chunk_size: int = 1000) -> dict:
+        """
+        Réapplique le mapping `ple` à TOUT le grand livre du client (lots
+        importés et lots de saisies manual_*).
+
+        Même règle qu'au chargement : solde signé = solde net du compte sur son
+        lot (Σdébit − Σcrédit par batch_id + compte), puis PleIndex.classify.
+        Seule la colonne `rubrique` est modifiée (ALTER TABLE … UPDATE), et
+        seulement pour les couples (lot, compte) dont la rubrique change.
+        Aucune ligne supprimée, aucune autre colonne touchée.
+
+        Returns: {lignes_modifiees, comptes_modifies}
+        """
+        db_name = self._get_db_name(client_id)
+        if not self._table_exists(db_name, 'grand_livre'):
+            return {'lignes_modifiees': 0, 'comptes_modifies': 0}
+
+        groups = self._execute(f"""
+            SELECT batch_id, compte, rubrique, sum(debit) - sum(credit), count()
+            FROM {db_name}.grand_livre FINAL
+            GROUP BY batch_id, compte, rubrique
+        """)
+
+        soldes: dict = {}
+        parts: dict = {}
+        for batch_id, compte, rubrique, solde, n in groups:
+            key = (batch_id, compte)
+            soldes[key] = soldes.get(key, 0.0) + float(solde)
+            parts.setdefault(key, []).append((rubrique or '', n))
+
+        changes: dict = {}
+        lignes = 0
+        for (batch_id, compte), rubriques in parts.items():
+            nouvelle = ple_index.classify(compte, solde_signe(soldes[(batch_id, compte)]))
+            n_changees = sum(n for r, n in rubriques if r != nouvelle)
+            if n_changees:
+                changes[f"{batch_id}#{compte}"] = nouvelle
+                lignes += n_changees
+
+        items = list(changes.items())
+        for i in range(0, len(items), chunk_size):
+            chunk = items[i:i + chunk_size]
+            keys = [k for k, _ in chunk]
+            self._execute(
+                f"""
+                ALTER TABLE {db_name}.grand_livre
+                UPDATE rubrique = transform(concat(batch_id, '#', compte),
+                                            %(keys)s, %(values)s, rubrique)
+                WHERE concat(batch_id, '#', compte) IN %(keys_in)s
+                """,
+                {'keys': keys, 'values': [v for _, v in chunk], 'keys_in': tuple(keys)},
+                settings={'mutations_sync': 1},
+            )
+
+        print(f"  ↻ Reclassement grand_livre : {lignes} ligne(s) sur "
+              f"{len(changes)} couple(s) lot/compte")
+        return {'lignes_modifiees': lignes, 'comptes_modifies': len(changes)}
 
     def delete_batch(self, client_id: str, batch_id: str):
         db_name = self._get_db_name(client_id)

@@ -25,6 +25,7 @@ ALLOWED_FORMATS = {
     'code_journal': {'excel'},
     'plan_tiers':   {'excel', 'sage_pnc'},
     'grand_livre':  {'excel', 'sage_pnm'},
+    'ple':          {'excel'},
 }
 
 

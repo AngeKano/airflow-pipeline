@@ -22,6 +22,7 @@ from etl.parsers.plan_tiers import parse_plan_tiers, load_plan_tiers_map
 from etl.parsers.grand_livre import parse_grand_livre
 from etl.parsers.sage_pnm import parse_sage_pnm
 from etl.parsers.sage_pnc import parse_sage_pnc
+from etl.parsers.ple import parse_ple
 
 __all__ = [
     # Base
@@ -43,6 +44,7 @@ __all__ = [
     'parse_plan_tiers',
     'load_plan_tiers_map',
     'parse_grand_livre',
+    'parse_ple',
     # Parsers Sage (largeur fixe)
     'parse_sage_pnm',
     'parse_sage_pnc',

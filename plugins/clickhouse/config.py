@@ -45,6 +45,16 @@ DIMENSION_CONFIG = {
         'pk_column': 'compte_tiers',
         'pk_index': 0,
     },
+    # Mapping racine → rubrique : clé COMPOSITE (type_rubrique, racine,
+    # nb_racine, solde_filter), identique à la clé de tri de la table.
+    'ple': {
+        'columns': '(racine, rubrique, nb_racine, type_rubrique, solde_filter, exclusions)',
+        'pk_indexes': [3, 0, 2, 4],
+        # Une ligne sans racine est ignorée (solde_filter peut légitimement être vide)
+        'required_indexes': [0],
+        # Colonnes UInt8 : insérées en entier, comparées sous forme normalisée
+        'int_columns': ['nb_racine'],
+    },
 }
 
 # ========================================

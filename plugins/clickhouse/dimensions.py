@@ -81,8 +81,20 @@ class DimensionManager(ClickHouseBase):
              rows_ecrites: [tuples ajoutés ou modifiés]}
         """
         columns = self._column_names(table_name)
-        pk_index = DIMENSION_CONFIG[table_name]['pk_index']
+        config = DIMENSION_CONFIG[table_name]
+        # Clé simple (pk_index) ou composite (pk_indexes, ex: ple)
+        pk_indexes = config.get('pk_indexes') or [config['pk_index']]
+        required = config.get('required_indexes', pk_indexes)
+        int_idx = [columns.index(c) for c in config.get('int_columns', [])]
         db_name = self._get_db_name(client_id)
+
+        def key_of(row):
+            return tuple(row[i] for i in pk_indexes)
+
+        def typed(row):
+            # Valeurs normalisées en texte pour comparer table et fichier ;
+            # les colonnes entières sont reconverties pour l'INSERT.
+            return tuple(int(v) if i in int_idx else v for i, v in enumerate(row))
 
         stats = {
             'lignes_fichier': len(data),
@@ -101,10 +113,10 @@ class DimensionManager(ClickHouseBase):
                 raise ValueError(
                     f"{table_name}: ligne à {len(row)} colonnes, attendu {len(columns)} {columns}"
                 )
-            if not row[pk_index]:
+            if any(not row[i] for i in required):
                 stats['ignorees'] += 1
                 continue
-            incoming[row[pk_index]] = row
+            incoming[key_of(row)] = row
 
         if not incoming:
             print(f"⚠️ Aucune donnée à intégrer dans {table_name}")
@@ -114,17 +126,17 @@ class DimensionManager(ClickHouseBase):
         existing = {}
         for r in self._execute(f"SELECT {cols_sql} FROM {db_name}.{table_name} FINAL"):
             r = self._normalize(r)
-            existing[r[pk_index]] = r
+            existing[key_of(r)] = r
 
         to_write = []
         for key, row in incoming.items():
             old = existing.get(key)
             if old is None:
                 stats['ajoutees'] += 1
-                to_write.append(row)
+                to_write.append(typed(row))
             elif old != row:
                 stats['modifiees'] += 1
-                to_write.append(row)
+                to_write.append(typed(row))
             else:
                 stats['inchangees'] += 1
 

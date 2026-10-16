@@ -16,6 +16,7 @@ from etl.parsers import (
     parse_code_journal,
     parse_plan_tiers,
     parse_sage_pnc,
+    parse_ple,
 )
 from etl.mapping import detect_plan_source, map_compte
 
@@ -25,6 +26,7 @@ DIMENSION_TABLES = {
     'plan_comptes': 'plan_compte',
     'code_journal': 'code_journal',
     'plan_tiers': 'plan_tiers',
+    'ple': 'ple',  # mapping racine → rubrique
 }
 
 # Alias acceptés pour désigner une dimension (noms de dossiers S3, de tables…)
@@ -35,6 +37,9 @@ _DIMENSION_ALIASES = {
     'code_journal': 'code_journal',
     'codes_journaux': 'code_journal',
     'plan_tiers': 'plan_tiers',
+    'ple': 'ple',
+    'mapping': 'ple',
+    'mapping_ple': 'ple',
 }
 
 
@@ -77,6 +82,10 @@ def _parse(dimension: str, file_path: str, file_format: str,
             result = parse_plan_tiers(file_path, client_id)
         return result['data'], {'parse_stats': result['stats']}
 
+    if dimension == 'ple':
+        result = parse_ple(file_path)
+        return result['data'], {'parse_stats': result['stats']}
+
     raise ValueError(f"Dimension non gérée: {dimension}")
 
 
@@ -87,7 +96,7 @@ def load_dimension(client_id: str, dimension: str, file_path: str,
     Parse un fichier de dimension et le fusionne dans sa table ClickHouse.
 
     Args:
-        dimension: 'plan_comptes' | 'code_journal' | 'plan_tiers' (ou alias)
+        dimension: 'plan_comptes' | 'code_journal' | 'plan_tiers' | 'ple' (ou alias)
         ch: ClickHouseManager ouvert
         propagate: répercuter les intitulés/types modifiés dans grand_livre
         require_rows: lever une erreur si le fichier ne donne aucune ligne
@@ -108,6 +117,27 @@ def load_dimension(client_id: str, dimension: str, file_path: str,
 
     stats = ch.upsert_dimension(client_id, table, rows)
     written = stats.pop('rows_ecrites', [])
+
+    if table == 'ple':
+        # Le mapping a changé : on reclasse le grand livre dans le même run.
+        # Les compteurs ajoutées/modifiées restent ceux du mapping.
+        reclassement = {'lignes_modifiees': 0, 'comptes_modifies': 0}
+        if written:
+            try:
+                reclassement = ch.reclassify_grand_livre(client_id)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Mapping mis à jour ({stats['ajoutees']} ajoutées, "
+                    f"{stats['modifiees']} modifiées) mais le reclassement du grand "
+                    f"livre a échoué : {e}. Relancez un reclassement."
+                ) from e
+        return {
+            'dimension': dimension,
+            'table': table,
+            **stats,
+            'reclassement': reclassement,
+            **info,
+        }
 
     propagated = 0
     if propagate and written:
