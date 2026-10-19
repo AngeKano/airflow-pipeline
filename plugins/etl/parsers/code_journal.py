@@ -12,26 +12,35 @@ from etl.parsers.base import (
 )
 
 
-def is_valid_code_journal(val: str) -> bool:
-    """Vérifie si c'est un code journal valide (2-5 caractères alphanumériques)."""
+TYPES_JOURNAUX = ['Achats', 'Trésorerie', 'Général', 'Ventes', 'Situation', 'A-nouveaux']
+
+
+def is_valid_code_journal(val: str, row_values: List[str] = ()) -> bool:
+    """
+    Vérifie si c'est un code journal valide (2-10 caractères).
+
+    - Code commençant par une lettre (ACH, BQUE, OD…) : accepté.
+    - Code numérique (200, 500, 850… — plans Sage à journaux numérotés) :
+      accepté seulement s'il est alphanumérique ET que la ligne porte un type
+      de journal reconnu, pour ne pas confondre avec un numéro de page/une date.
+    """
     if not val:
         return False
     val = val.strip()
-    
+
     # Codes à ignorer
     invalid_codes = ['=', 'C.L', 'Som', 'Rap', 'Tot', 'Code', 'N°', 'Rglt']
     if val in invalid_codes:
         return False
-    
-    # Doit être court et alphanumérique
+
+    # Doit être court
     if len(val) < 2 or len(val) > 10:
         return False
-    
-    # Doit commencer par une lettre
-    if not val[0].isalpha():
-        return False
-    
-    return True
+
+    if val[0].isalpha():
+        return True
+
+    return val.isalnum() and any(v in TYPES_JOURNAUX for v in row_values)
 
 
 def parse_code_journal(file_path: str, client_id: str) -> Dict:
@@ -54,7 +63,7 @@ def parse_code_journal(file_path: str, client_id: str) -> Dict:
     metadata = extract_file_metadata(data_list, client_id)
     
     results = []
-    types_connus = ['Achats', 'Trésorerie', 'Général', 'Ventes', 'Situation', 'A-nouveaux']
+    types_connus = TYPES_JOURNAUX
     stats = {'total': 0, 'by_type': {}}
     
     for i, row in enumerate(data_list):
@@ -71,7 +80,7 @@ def parse_code_journal(file_path: str, client_id: str) -> Dict:
         # Le code journal est généralement le premier élément valide
         code = values[0] if values else ""
         
-        if not is_valid_code_journal(code):
+        if not is_valid_code_journal(code, values[1:]):
             continue
         
         # Chercher l'intitulé (2ème valeur) et le type (valeur connue)
